@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { generateListing } from "@/lib/openai";
+import { generateListing } from "@/lib/gemini";
 import { CATEGORIES, CONDITIONS } from "@/lib/types";
 import type { ProductInput } from "@/lib/types";
 import * as Sentry from "@sentry/nextjs";

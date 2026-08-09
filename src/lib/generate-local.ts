@@ -28,7 +28,7 @@ function categoryKeywords(category: string): string[] {
 }
 
 /**
- * Deterministic local generator used when OPENAI_API_KEY is absent,
+ * Deterministic local generator used when GEMINI_API_KEY is absent,
  * or as a fallback if the OpenAI call fails.
  */
 export function generateLocally(input: ProductInput): GenerateResult {

@@ -7,7 +7,7 @@
 - Next.js (App Router) + TypeScript
 - Tailwind CSS
 - Lucide Icons
-- OpenAI API
+- Google Gemini API (`@ai-sdk/google`)
 - Sentry (`@sentry/nextjs`)
 - Discord Webhook（お問い合わせ通知）
 
@@ -24,7 +24,7 @@ npm run dev
 
 | 変数名 | 用途 |
 | --- | --- |
-| `OPENAI_API_KEY` | 出品文生成（未設定時はローカル生成にフォールバック） |
+| `GEMINI_API_KEY` | 出品文生成（未設定時はローカル生成にフォールバック） |
 | `NEXT_PUBLIC_SENTRY_DSN` | Sentry エラー監視 |
 | `DISCORD_WEBHOOK_URL` | お問い合わせの Discord 通知 |
 
