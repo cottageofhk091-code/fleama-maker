@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import { ContactForm } from "@/components/contact-form";
+import { SITE_NAME } from "@/lib/site";
 
 export const metadata: Metadata = {
-  title: "お問い合わせ | フリマ一発売却メーカー",
-  description: "フリマ一発売却メーカーへのお問い合わせ",
+  title: "お問い合わせ",
+  description: `${SITE_NAME}へのお問い合わせ`,
 };
 
 export default function ContactPage() {

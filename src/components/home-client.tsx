@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ProductForm } from "@/components/product-form";
 import { ResultPanel } from "@/components/result-panel";
 import { LoadingOverlay } from "@/components/loading-overlay";
+import { SITE_NAME, SITE_TAGLINE } from "@/lib/site";
 import type { GenerateResult, ProductInput } from "@/lib/types";
 
 export function HomeClient() {
@@ -26,13 +27,13 @@ export function HomeClient() {
         />
         <div className="mx-auto max-w-5xl px-4 pb-8 pt-10 sm:px-6 sm:pt-14">
           <p className="font-display text-sm font-semibold tracking-[0.18em] text-teal-700 uppercase dark:text-teal-300">
-            フリマ出品サポート
+            フリマ出品アシスタントAI
           </p>
           <h1 className="mt-3 max-w-2xl font-display text-3xl font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl dark:text-white">
-            フリマ一発売却メーカー
+            {SITE_NAME}
           </h1>
           <p className="mt-3 max-w-xl text-base leading-relaxed text-slate-600 dark:text-slate-300">
-            商品情報を入れるだけで、検索に強いタイトル・売れる説明文・ハッシュタグを一発生成。
+            {SITE_TAGLINE}
           </p>
         </div>
       </section>

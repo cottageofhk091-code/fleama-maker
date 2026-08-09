@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { scrubPiiText } from "@/lib/sentry-scrub";
+import { SITE_NAME } from "@/lib/site";
 
 type ContactBody = {
   name?: string;
@@ -49,7 +50,7 @@ export async function POST(request: Request) {
     }
 
     const content = [
-      "📬 **フリマ一発売却メーカー — お問い合わせ**",
+      `📬 **${SITE_NAME} — お問い合わせ**`,
       `**お名前:** ${name}`,
       `**メール:** ${email}`,
       "**メッセージ:**",
@@ -60,7 +61,7 @@ export async function POST(request: Request) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        username: "フリマ一発売却メーカー",
+        username: SITE_NAME,
         content,
       }),
     });
