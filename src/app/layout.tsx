@@ -2,7 +2,12 @@ import type { Metadata } from "next";
 import { Noto_Sans_JP, Zen_Maru_Gothic } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Header } from "@/components/header";
-import { SITE_DESCRIPTION, SITE_NAME, SITE_TAGLINE } from "@/lib/site";
+import {
+  SITE_DESCRIPTION,
+  SITE_NAME,
+  SITE_TAGLINE,
+  siteAssets,
+} from "@/lib/site";
 import "./globals.css";
 
 const notoSansJp = Noto_Sans_JP({
@@ -28,9 +33,12 @@ export const metadata: Metadata = {
   description: SITE_DESCRIPTION,
   applicationName: SITE_NAME,
   icons: {
-    icon: [{ url: "/favicon.ico", sizes: "any" }],
-    shortcut: "/favicon.ico",
-    apple: "/favicon.ico",
+    icon: [
+      { url: siteAssets.faviconIco, sizes: "any" },
+      { url: siteAssets.faviconPng, type: "image/png", sizes: "512x512" },
+    ],
+    shortcut: siteAssets.faviconIco,
+    apple: siteAssets.faviconPng,
   },
   openGraph: {
     title: SITE_NAME,
@@ -40,7 +48,7 @@ export const metadata: Metadata = {
     type: "website",
     images: [
       {
-        url: "/og.png",
+        url: siteAssets.headerNote,
         width: 1280,
         height: 670,
         alt: `${SITE_NAME} — ${SITE_TAGLINE}`,
@@ -51,7 +59,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: SITE_NAME,
     description: SITE_TAGLINE,
-    images: ["/og.png"],
+    images: [siteAssets.headerNote],
   },
 };
 
