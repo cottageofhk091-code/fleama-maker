@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #f4f7f9;
+  --foreground: #0f172a;
+  --accent: #0d9488;
+  --surface: #ffffff;
+}
+
+.dark {
+  --background: #020617;
+  --foreground: #e2e8f0;
+  --accent: #2dd4bf;
+  --surface: #0f172a;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-noto-sans-jp);
+  --font-display: var(--font-zen-maru);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-noto-sans-jp), system-ui, sans-serif;
+}
+
+.font-display {
+  font-family: var(--font-zen-maru), var(--font-noto-sans-jp), system-ui, sans-serif;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-in-fade {
+  animation: fade-up 0.45s ease-out both;
+}
