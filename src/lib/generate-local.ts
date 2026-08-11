@@ -1,4 +1,16 @@
 import type { GenerateResult, ProductInput } from "./types";
+import {
+  confirmedSeoCore,
+  displayProductWithModel,
+  hasModelForSeo,
+} from "./types";
+import {
+  boostCommentsFromPatterns,
+  buildLocalBoostPatterns,
+  pickRecommendedBoostId,
+} from "./boost-patterns";
+import { conditionBodyCopy, conditionDisplayLabel } from "./condition";
+import { buyerBenefitLead, detectProductKind } from "./buyer-benefits";
 
 function cleanPart(value?: string): string {
   return (value ?? "").trim();
@@ -14,63 +26,105 @@ function conditionKeyword(condition: string): string {
 
 function categoryKeywords(category: string): string[] {
   switch (category) {
-    case "古着・ファッション":
+    case "ファッション・古着":
       return ["古着", "ファッション", "コーデ"];
     case "家電・ガジェット":
       return ["家電", "ガジェット", "動作確認済"];
-    case "本・ゲーム":
-      return ["本", "ゲーム", "コレクション"];
-    case "インテリア・雑貨":
-      return ["インテリア", "雑貨", "おしゃれ"];
+    case "コスメ・美容":
+      return ["コスメ", "美容", "スキンケア"];
     default:
       return ["フリマ", "おすすめ"];
   }
 }
 
-/**
- * Deterministic local generator used when GEMINI_API_KEY is absent,
- * or as a fallback if the OpenAI call fails.
- */
-export function generateLocally(input: ProductInput): GenerateResult {
-  const brand = cleanPart(input.brand) || "ブランド";
-  const product = cleanPart(input.productName) || "商品";
-  const condition = cleanPart(input.condition);
-  const size = cleanPart(input.size);
-  const color = cleanPart(input.color);
-  const notes = cleanPart(input.notes);
-  const condKey = conditionKeyword(condition);
-  const catKeys = categoryKeywords(input.category);
+function strengthsFor(input: ProductInput): string[] {
+  const kind = detectProductKind(input);
+  switch (kind) {
+    case "circulator":
+      return [
+        "空気循環でエアコン効率アップ＆節電",
+        "静音寄りで夜間・室内干しも快適",
+        "風量調整でシーンに合わせて使える",
+      ];
+    case "gadget":
+      return [
+        "毎日の作業・エンタメがスムーズになる",
+        "操作が分かりやすくすぐ使い始められる",
+        "長く使える実用性が高い",
+      ];
+    case "fashion":
+      return [
+        "コーデの主役／脇役として合わせやすい",
+        "着心地とシルエットのバランスが良い",
+        "サイズ感が分かりやすく安心して選べる",
+      ];
+    case "cosmetics":
+      return [
+        "肌・髪のケアが続けやすい使い心地",
+        "残量が明確でコスパ判断しやすい",
+        "毎日のルーティンに取り入れやすい",
+      ];
+    default:
+      return [
+        "日常のストレスを減らす実用メリット",
+        "届いたその日から使い始めやすい",
+        "価格以上の満足感を感じやすいバランス",
+      ];
+  }
+}
 
-  const sizeColor = [size && `サイズ${size}`, color && color]
-    .filter(Boolean)
-    .join(" ");
+export function generateLocally(
+  input: ProductInput,
+  options: { trendSeo?: boolean; proCopyQuality?: boolean } = {},
+): GenerateResult {
+  const brand = input.brand.trim();
+  const productName = input.productName.trim();
+  const modelNumber = input.modelNumber.trim();
+  const useModel = hasModelForSeo(modelNumber);
+  const product = displayProductWithModel({ productName, modelNumber });
+  const seoCore = confirmedSeoCore({ brand, productName, modelNumber });
+  const strengths = strengthsFor(input);
+  const size = cleanPart(input.size);
+  const operationStatus = cleanPart(input.operationStatus);
+  const remainingAmount = cleanPart(input.remainingAmount);
+  const color = cleanPart(input.color);
+  const notes = cleanPart(input.notes || input.conditionMemo);
+  const condKey = conditionKeyword(input.condition);
+  const catKeys = categoryKeywords(input.category);
+  const conditionLabel = conditionDisplayLabel(
+    input.condition,
+    input.conditionMemo,
+  );
+  const trendBits = options.trendSeo
+    ? ["匿名配送可", "即日発送", "人気上昇中"]
+    : [];
+
+  const extraTitleBit =
+    size ||
+    operationStatus?.slice(0, 10) ||
+    remainingAmount?.slice(0, 10) ||
+    strengths[0]?.slice(0, 12);
 
   const titles = [
     {
       type: "seo" as const,
       label: "検索キーワード特化型",
-      title: [
-        brand,
-        product,
-        sizeColor,
-        condition,
-        catKeys[0],
-        "送料込可",
-      ]
+      title: [seoCore, size && `サイズ${size}`, extraTitleBit, ...trendBits.slice(0, 1)]
         .filter(Boolean)
         .join(" ")
         .slice(0, 64),
     },
     {
       type: "condition" as const,
-      label: "美品・コンディション強調型",
+      label: "体験・ベネフィット強調型",
       title: [
-        `【${condKey}】`,
         brand,
-        product,
-        size && `Size ${size}`,
-        color,
-        "丁寧に保管",
+        productName,
+        useModel ? modelNumber : null,
+        strengths[1]?.slice(0, 14) || "生活がラクになる",
+        condKey === "現状品" || condKey === "良品"
+          ? "お得に始められる"
+          : "すぐ使える",
       ]
         .filter(Boolean)
         .join(" ")
@@ -79,80 +133,114 @@ export function generateLocally(input: ProductInput): GenerateResult {
     {
       type: "shipping" as const,
       label: "即日発送・お得感アピール型",
-      title: [
-        "【即日発送】",
-        brand,
-        product,
-        condKey,
-        "お買い得",
-        notes?.includes("即日") ? "本日発送" : "迅速対応",
-      ]
+      title: ["【即日発送】", seoCore, condKey, "お買い得", ...trendBits.slice(1, 2)]
         .filter(Boolean)
         .join(" ")
         .slice(0, 64),
     },
   ];
 
-  const measurePlaceholder =
-    input.category === "古着・ファッション"
-      ? `【採寸・仕様】
-・身幅：○○ cm
-・着丈：○○ cm
-・袖丈：○○ cm
-・素材：○○
-※実寸は実測値です。多少の誤差はご了承ください。`
+  const categoryExtraBlock =
+    input.category === "ファッション・古着"
+      ? `【サイズ】\n・${size || "（要確認）"}`
       : input.category === "家電・ガジェット"
-        ? `【仕様・動作確認】
-・型番：${product}
-・電源/起動：確認済（要記入）
-・付属品：○○
-・付属品以外の付属物はありません。`
-        : `【仕様】
+        ? `【動作状態】\n・${operationStatus || "（要確認）"}
+・メーカー：${brand}
+・商品名：${productName}
+${useModel ? `・型番：${modelNumber}` : "・型番：記載なし（特徴・実用性でご案内）"}`
+        : input.category === "コスメ・美容"
+          ? `【残量・使用回数】\n・${remainingAmount || "（要確認）"}`
+          : `【仕様】
+・メーカー：${brand}
+・商品名：${productName}
+${useModel ? `・型番：${modelNumber}` : ""}
 ・サイズ：${size || "○○"}
-・カラー：${color || "○○"}
-・その他仕様：○○`;
+・カラー：${color || "○○"}`;
 
-  const description = `【アイテム概要・魅力】
-${brand}の「${product}」です。
-${catKeys.join("・")}好きの方におすすめの一品。
-${notes ? `特記事項：${notes}` : "ご自宅での保管状態も良好で、すぐにご活用いただけます。"}
-購買意欲を刺激するポイントとして、ブランドらしさと実用性のバランスが魅力です。
+  const benefitLead = buyerBenefitLead({
+    ...input,
+    brand,
+    productName: product,
+  });
 
-【コンディション詳細】
-状態：${condition}
-${condKey === "新品" ? "タグ付き/未使用の可能性が高い商品です。開封済みの場合は記載内容をご確認ください。" : ""}
-${condKey === "美品" ? "目立った傷・汚れは少なく、きれいなコンディションです。" : ""}
-${condKey === "良品" || condKey === "現状品" ? "使用感はありますが、まだまだご愛用いただけます。写真もあわせてご確認ください。" : ""}
-カラー：${color || "（記載なし）"} ／ サイズ：${size || "（記載なし）"}
+  const strengthLines = strengths.map((s) => `・${s}`).join("\n");
+  const proLead = options.proCopyQuality
+    ? `\n${brand}の${productName}${useModel ? `（型番 ${modelNumber}）` : ""}は、毎日のシーンで『ちょっと快適』が積み重なる一点です。\n`
+    : "";
 
-${measurePlaceholder}
+  const description = `【こんな体験が待っています】
+${proLead}${benefitLead}
+${notes ? `特記：${notes}` : ""}
+
+【この商品ならではの強み】
+${strengthLines}
+
+【確定スペック】
+・メーカー：${brand}
+・商品名：${productName}
+${useModel ? `・型番：${modelNumber}` : "・型番：なし（特徴・実用メリット中心のご案内）"}
+${size ? `・サイズ：${size}` : ""}
+${operationStatus ? `・動作状態：${operationStatus}` : ""}
+${remainingAmount ? `・残量・使用回数：${remainingAmount}` : ""}
+
+【コンディションと安心】
+状態：${conditionLabel}
+${conditionBodyCopy(input.condition, input.conditionMemo)}
+カラー：${color || "（記載なし）"}
+
+${categoryExtraBlock}
 
 【発送・梱包について】
-・丁寧に梱包し、配送中の破損・汚れを防ぐよう心がけます
-・基本的に迅速対応（${notes?.includes("即日") ? "即日発送可能" : "可能な限り早めに発送"}）
-・匿名配送にも対応可能です（取引メッセージでご相談ください）
+・丁寧に梱包し、届いたその日から安心して使い始められるよう心がけます
+・基本的に迅速対応（${notes?.includes("即日") || notes?.includes("24時間") ? "即日／24時間以内発送可能" : "可能な限り早めに発送"}）
+・匿名配送にも対応可能です
 
-【ご購入前のお願い・注意書き】
-・値下げ交渉はお気軽にどうぞ。ただし過度な値引き・連投はご遠慮ください
-・色味はモニター環境により実物と異なる場合があります
-・個人間売買のため返品・返金は原則不可です（初期不良時はご連絡ください）
-・質問があればお気軽にコメントください。気持ちの良い取引を心がけております`;
+【ご購入前のお願い】
+・値下げ交渉はお気軽にどうぞ（過度な連投はご遠慮ください）
+・色味はモニターにより異なる場合があります
+・個人間売買のため返品は原則不可です（初期不良時はご連絡ください）`;
+
+  const conditionTag =
+    condKey === "新品"
+      ? "#新品"
+      : condKey === "美品"
+        ? "#美品"
+        : condKey === "良品"
+          ? "#使用感あり"
+          : "#現状品";
 
   const hashtags = Array.from(
     new Set(
       [
         `#${brand.replace(/\s+/g, "")}`,
-        `#${product.replace(/\s+/g, "").slice(0, 20)}`,
+        `#${productName.replace(/\s+/g, "").slice(0, 20)}`,
+        useModel ? `#${modelNumber.replace(/\s+/g, "")}` : null,
+        size ? `#サイズ${size.replace(/\s+/g, "")}` : null,
         `#${catKeys[0]}`,
         `#フリマ`,
         `#メルカリ`,
-        condKey === "新品" ? "#新品" : "#美品",
+        conditionTag,
         "#即日発送",
-        size ? `#サイズ${size}` : "#お得",
-        color ? `#${color}` : null,
       ].filter(Boolean) as string[],
     ),
   ).slice(0, 8);
 
-  return { titles, description, hashtags };
+  const boostPatterns = buildLocalBoostPatterns({
+    ...input,
+    brand,
+    productName,
+    modelNumber,
+  });
+
+  return {
+    identifiedBrand: brand,
+    identifiedProduct: product,
+    productStrengths: strengths,
+    boostPatterns,
+    recommendedBoostId: pickRecommendedBoostId(boostPatterns),
+    boostComments: boostCommentsFromPatterns(boostPatterns),
+    titles,
+    description,
+    hashtags,
+  };
 }

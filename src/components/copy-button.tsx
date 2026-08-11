@@ -8,13 +8,16 @@ type Props = {
   label?: string;
   className?: string;
   size?: "sm" | "md";
+  /** Stronger CTA styling for primary paste targets */
+  emphasis?: boolean;
 };
 
 export function CopyButton({
   text,
-  label = "コピー",
+  label = "ワンタップでコピー",
   className = "",
   size = "sm",
+  emphasis = false,
 }: Props) {
   const [copied, setCopied] = useState(false);
 
@@ -29,15 +32,17 @@ export function CopyButton({
   }
 
   const sizeClass =
-    size === "md"
-      ? "h-10 px-4 text-sm"
-      : "h-8 px-3 text-xs";
+    size === "md" ? "h-10 px-4 text-sm" : "h-8 px-3 text-xs";
+
+  const toneClass = emphasis
+    ? "border-teal-600 bg-teal-600 text-white hover:bg-teal-500 dark:border-teal-500 dark:bg-teal-600 dark:text-white dark:hover:bg-teal-500"
+    : "border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100 dark:border-teal-800 dark:bg-teal-950/50 dark:text-teal-200 dark:hover:bg-teal-900/60";
 
   return (
     <button
       type="button"
       onClick={handleCopy}
-      className={`inline-flex items-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50 font-medium text-teal-800 transition hover:bg-teal-100 dark:border-teal-800 dark:bg-teal-950/50 dark:text-teal-200 dark:hover:bg-teal-900/60 ${sizeClass} ${className}`}
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border font-semibold transition ${sizeClass} ${toneClass} ${className}`}
     >
       {copied ? (
         <>

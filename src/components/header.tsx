@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { Sparkles } from "lucide-react";
 import { ThemeToggle } from "./theme-toggle";
+import { BrandMark } from "./brand-mark";
 import { SITE_NAME, SITE_SHORT_NAME } from "@/lib/site";
 
 export function Header() {
@@ -9,15 +9,19 @@ export function Header() {
       <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 sm:px-6">
         <Link
           href="/"
-          className="flex items-center gap-2 font-display text-base font-bold tracking-tight text-slate-900 dark:text-white"
+          className="flex items-center gap-2.5 font-display text-base font-bold tracking-tight text-slate-900 dark:text-white"
         >
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-teal-600 text-white shadow-sm">
-            <Sparkles className="h-4 w-4" />
-          </span>
+          <BrandMark size={32} className="shrink-0 rounded-lg shadow-sm" />
           <span className="hidden sm:inline">{SITE_NAME}</span>
           <span className="sm:hidden">{SITE_SHORT_NAME}</span>
         </Link>
         <div className="flex items-center gap-2">
+          <Link
+            href="/account"
+            className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-200/60 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+          >
+            マイページ
+          </Link>
           <Link
             href="/contact"
             className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-200/60 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"

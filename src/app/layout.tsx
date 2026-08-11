@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { Noto_Sans_JP, Zen_Maru_Gothic } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
+import { BillingProvider } from "@/components/billing/billing-provider";
 import { Header } from "@/components/header";
+import { Footer } from "@/components/footer";
 import {
   SITE_DESCRIPTION,
   SITE_NAME,
@@ -24,7 +26,10 @@ const zenMaru = Zen_Maru_Gothic({
 
 export const metadata: Metadata = {
   metadataBase: new URL(
-    process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
+    (process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000").replace(
+      /\/$/,
+      "",
+    ),
   ),
   title: {
     default: SITE_NAME,
@@ -72,11 +77,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <ThemeProvider>
-          <Header />
-          <main className="flex-1">{children}</main>
-          <footer className="border-t border-slate-200/80 py-6 text-center text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
-            © {new Date().getFullYear()} {SITE_NAME}
-          </footer>
+          <BillingProvider>
+            <Header />
+            <main className="flex-1">{children}</main>
+            <Footer />
+          </BillingProvider>
         </ThemeProvider>
       </body>
     </html>

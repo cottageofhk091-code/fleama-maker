@@ -21,7 +21,7 @@ export function LoadingOverlay({ message = "出品文を生成中…" }: { messa
             {message}
           </p>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            SEOタイトルと説明文を最適化しています
+            修正不要の完成文に仕上げています
           </p>
         </div>
         <div className="flex w-full gap-1.5">
