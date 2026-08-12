@@ -47,14 +47,14 @@ export async function POST(request: Request) {
     }
 
     const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
-    const content = [
-      `📬 **${SITE_NAME} — ${kind === "cancel" ? "解約申請" : "お問い合わせ"}**`,
-      `**件名:** ${subject}`,
-      `**お名前:** ${name}`,
-      `**メール:** ${email}`,
-      "**内容:**",
-      message.slice(0, 1800),
-    ].join("\n");
+    const isCancel = kind === "cancel";
+    const replySubject = `【お問い合わせへの返信】${SITE_NAME}`;
+    const gmailComposeUrl =
+      `https://mail.google.com/mail/?view=cm&fs=1` +
+      `&to=${encodeURIComponent(email)}` +
+      `&su=${encodeURIComponent(replySubject)}`;
+    const embedMessage =
+      message.length > 1000 ? `${message.slice(0, 997)}...` : message;
 
     // Discord 未設定でもフォーム送信は受け付ける（暫定）
     if (!webhookUrl) {
@@ -81,7 +81,47 @@ export async function POST(request: Request) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         username: SITE_NAME,
-        content,
+        embeds: [
+          {
+            title: isCancel
+              ? "📩 新しい解約申請が届きました"
+              : "📩 新しいお問い合わせが届きました",
+            color: 3447003,
+            // **[text](url)** だと Discord がハイパーリンク化しないことがあるため、
+            // リンク自体は太字で囲まず、インラインコードでメールをコピーしやすくする
+            description: [
+              "👤 **送信者メールアドレス:**",
+              `\`${email}\` (クリックでコピー)`,
+              "",
+              `🚀 [✉️ Web版Gmailで返信画面を開く](${gmailComposeUrl})`,
+            ].join("\n"),
+            fields: [
+              {
+                name: "お名前",
+                value: `${name} 様`,
+                inline: true,
+              },
+              {
+                name: "メールアドレス",
+                value: `\`${email}\``,
+                inline: true,
+              },
+              {
+                name: "件名",
+                value: subject,
+                inline: false,
+              },
+              {
+                name: "お問い合わせ内容",
+                value: embedMessage,
+              },
+              {
+                name: "返信アクション",
+                value: `[✉️ Web版Gmailで返信画面を開く](${gmailComposeUrl})`,
+              },
+            ],
+          },
+        ],
       }),
     });
 
