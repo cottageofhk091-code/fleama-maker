@@ -5,6 +5,7 @@ import {
   currentMonthKey,
   isUnlimitedPlan,
 } from "./quotas";
+import { isDevProBypassEnabled } from "./dev-bypass";
 import type {
   BillingState,
   ConsumeResult,
@@ -60,6 +61,11 @@ function freeRemainingFor(state: BillingState): number {
 export function tryConsumeGeneration(raw: BillingState): ConsumeResult {
   const state = syncBillingMonth(raw);
 
+  // Local note/screenshot: Sold Pro 扱い（本番では isDevProBypassEnabled が常に false）
+  if (isDevProBypassEnabled()) {
+    return { ok: true, source: "premium", state };
+  }
+
   if (isUnlimitedPlan(state.plan)) {
     return { ok: true, source: "premium", state };
   }
@@ -93,6 +99,23 @@ export function tryConsumeGeneration(raw: BillingState): ConsumeResult {
 
 export function getQuotaSnapshot(raw: BillingState): QuotaSnapshot {
   const state = syncBillingMonth(raw);
+
+  if (isDevProBypassEnabled()) {
+    return {
+      plan: "pro",
+      isPremium: true,
+      isPro: true,
+      freeRemaining: Number.POSITIVE_INFINITY,
+      freeLimit: Number.POSITIVE_INFINITY,
+      ticketBalance: state.ticketBalance,
+      indicatorLabel: "Sold Pro（開発バイパス）：一括生成・SEO予測つき無制限",
+      canGenerate: true,
+      templateCount: state.templates.length,
+      templateLimit: null,
+      canSaveTemplate: true,
+    };
+  }
+
   const isPro = state.plan === "pro";
   const isPremium = isUnlimitedPlan(state.plan);
   const freeLimit = isPremium
@@ -152,6 +175,7 @@ export function getQuotaSnapshot(raw: BillingState): QuotaSnapshot {
 export function canSaveTemplate(state: BillingState): boolean {
   return getQuotaSnapshot(state).canSaveTemplate;
 }
+
 
 export function saveTemplate(
   state: BillingState,

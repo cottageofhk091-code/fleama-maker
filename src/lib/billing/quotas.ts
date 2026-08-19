@@ -13,8 +13,10 @@ export const FREE_TEMPLATE_LIMIT = 2;
 export const PRO_BULK_MAX_ITEMS = 10;
 
 export const PRICING = {
-  premiumMonthlyYen: 780,
-  proMonthlyYen: 2980,
+  /** Sold プレミアム 月額（税込・円） */
+  premiumMonthlyYen: 500,
+  /** Sold Pro 月額（税込・円） */
+  proMonthlyYen: 980,
   ticketPackCount: 10,
   ticketPackYen: 300,
 } as const;

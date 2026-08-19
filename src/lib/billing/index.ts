@@ -9,6 +9,7 @@ export {
   currentMonthKey,
   isUnlimitedPlan,
 } from "./quotas";
+export { isDevProBypassEnabled } from "./dev-bypass";
 export {
   createDefaultBillingState,
   syncBillingMonth,

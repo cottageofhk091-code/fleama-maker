@@ -16,6 +16,36 @@ function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+/** Discord 通知の「Gmailで返信」で開く事業用アカウント（表示用） */
+const SUPPORT_GMAIL_ACCOUNT_DEFAULT = "nomadlabsupport@gmail.com";
+
+/**
+ * ブラウザにログイン中の Gmail アカウント番号（0=プライマリ、1=2つ目＝事業用想定）。
+ * メールアドレス直指定パスは Google がプライマリへリダイレクトするため /u/{n}/ を使う。
+ */
+const SUPPORT_GMAIL_ACCOUNT_INDEX_DEFAULT = "1";
+
+/**
+ * 事業用 Google アカウントで Gmail 作成画面を開く URL。
+ * /mail/u/{index}/ でセッション内のアカウント枠を指定する。
+ */
+function buildSupportGmailComposeUrl(
+  customerEmail: string,
+  replySubject: string,
+): string {
+  const rawIndex =
+    process.env.SUPPORT_GMAIL_ACCOUNT_INDEX?.trim() ||
+    SUPPORT_GMAIL_ACCOUNT_INDEX_DEFAULT;
+  const accountIndex = /^\d+$/.test(rawIndex) ? rawIndex : SUPPORT_GMAIL_ACCOUNT_INDEX_DEFAULT;
+
+  return (
+    `https://mail.google.com/mail/u/${accountIndex}/` +
+    `?view=cm&fs=1` +
+    `&to=${encodeURIComponent(customerEmail)}` +
+    `&su=${encodeURIComponent(replySubject)}`
+  );
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ContactBody;
@@ -49,10 +79,12 @@ export async function POST(request: Request) {
     const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
     const isCancel = kind === "cancel";
     const replySubject = `【お問い合わせへの返信】${SITE_NAME}`;
-    const gmailComposeUrl =
-      `https://mail.google.com/mail/?view=cm&fs=1` +
-      `&to=${encodeURIComponent(email)}` +
-      `&su=${encodeURIComponent(replySubject)}`;
+    const gmailComposeUrl = buildSupportGmailComposeUrl(email, replySubject);
+    const supportAccount =
+      process.env.SUPPORT_GMAIL_ACCOUNT?.trim() || SUPPORT_GMAIL_ACCOUNT_DEFAULT;
+    const supportAccountIndex =
+      process.env.SUPPORT_GMAIL_ACCOUNT_INDEX?.trim() ||
+      SUPPORT_GMAIL_ACCOUNT_INDEX_DEFAULT;
     const embedMessage =
       message.length > 1000 ? `${message.slice(0, 997)}...` : message;
 
@@ -93,7 +125,8 @@ export async function POST(request: Request) {
               "👤 **送信者メールアドレス:**",
               `\`${email}\` (クリックでコピー)`,
               "",
-              `🚀 [✉️ Web版Gmailで返信画面を開く](${gmailComposeUrl})`,
+              `🚀 [✉️ 事業用Gmailで返信画面を開く](${gmailComposeUrl})`,
+              `_送信元: \`${supportAccount}\`（アカウント枠 /u/${supportAccountIndex}/）_`,
             ].join("\n"),
             fields: [
               {
@@ -117,7 +150,7 @@ export async function POST(request: Request) {
               },
               {
                 name: "返信アクション",
-                value: `[✉️ Web版Gmailで返信画面を開く](${gmailComposeUrl})`,
+                value: `[✉️ 事業用Gmailで返信画面を開く](${gmailComposeUrl})`,
               },
             ],
           },

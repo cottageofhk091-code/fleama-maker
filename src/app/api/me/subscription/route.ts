@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
+import { isDevProBypassEnabled } from "@/lib/billing";
 import { getStripeCustomerIdForUser } from "@/lib/stripe-customer-store";
 import { getOrCreateUserId } from "@/lib/user-session";
 
@@ -9,6 +10,16 @@ import { getOrCreateUserId } from "@/lib/user-session";
  */
 export async function GET() {
   try {
+    if (isDevProBypassEnabled()) {
+      return NextResponse.json({
+        userId: "dev-bypass",
+        subscribed: true,
+        status: "subscribed",
+        customerIdHint: "dev_bypass",
+        devBypassPro: true,
+      });
+    }
+
     const { userId } = await getOrCreateUserId();
     const stripeCustomerId = await getStripeCustomerIdForUser(userId);
     const subscribed = Boolean(stripeCustomerId);

@@ -101,6 +101,26 @@ export async function POST(request: Request) {
     const origin = getSiteOrigin(request);
     const stripe = getStripe();
 
+    // Stripe Price の実額とアプリ表示価格の整合性チェック（JPY は unit_amount = 円）
+    const stripePrice = await stripe.prices.retrieve(plan.priceId);
+    const stripeAmount = stripePrice.unit_amount;
+    if (
+      stripePrice.currency !== "jpy" ||
+      stripeAmount == null ||
+      stripeAmount !== plan.priceYen
+    ) {
+      Sentry.captureMessage(
+        `Stripe price mismatch: ${plan.priceId} currency=${stripePrice.currency} unit_amount=${stripeAmount} expectedYen=${plan.priceYen}`,
+        "error",
+      );
+      return NextResponse.json(
+        {
+          error: `${plan.label}の Stripe 価格（${stripeAmount ?? "未設定"}円）がアプリ設定（${plan.priceYen}円）と一致しません。Stripe で月額 ${plan.priceYen}円の Price を作成し、環境変数の Price ID を更新してください。`,
+        },
+        { status: 503 },
+      );
+    }
+
     const successUrl = `${origin}/account?checkout=success&plan=${planType}&session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl = `${origin}/account?checkout=cancel`;
 

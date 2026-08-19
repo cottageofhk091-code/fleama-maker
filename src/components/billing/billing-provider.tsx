@@ -105,6 +105,14 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     return { ok: true as const, source: result.source };
   }, [persist]);
 
+  // 開発バイパス時は Paywall を自動で閉じる（スクショ用）
+  useEffect(() => {
+    if (!ready) return;
+    if (quota.isPro && paywallOpen) {
+      setPaywallOpen(false);
+    }
+  }, [ready, quota.isPro, paywallOpen]);
+
   const rollbackReservation = useCallback(
     (source: ConsumeSource) => {
       const prev = stateRef.current;
