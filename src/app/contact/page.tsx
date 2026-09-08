@@ -19,9 +19,6 @@ export default function ContactPage() {
       <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
         機能のご要望・不具合報告・決済／解約など、下記フォームよりご連絡ください。
       </p>
-      <p className="mt-2 rounded-lg border border-amber-200/80 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-        ※外部通知（Discord）連携は準備中です。フォーム送信は受け付けており、運営が内容を確認します。
-      </p>
       <div className="mt-8">
         <ContactForm />
       </div>

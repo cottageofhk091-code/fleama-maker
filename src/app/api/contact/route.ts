@@ -1,182 +1,126 @@
-import { NextResponse } from "next/server";
-import * as Sentry from "@sentry/nextjs";
-import { scrubPiiText } from "@/lib/sentry-scrub";
-import { SITE_NAME } from "@/lib/site";
+import { NextResponse } from 'next/server';
 
-type ContactBody = {
-  name?: string;
-  email?: string;
-  subject?: string;
-  message?: string;
-  /** Optional kind for routing (e.g. cancel) */
-  kind?: string;
-};
+const APP_NAME = 'フリマリストSold';
+const DEFAULT_CONTACT_EMAIL = 'support@cloudflowriver.com';
 
-function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+function getContactEmail(): string {
+  return (process.env.CONTACT_EMAIL || DEFAULT_CONTACT_EMAIL).trim();
 }
 
-/** Discord 通知の「Gmailで返信」で開く事業用アカウント（表示用） */
-const SUPPORT_GMAIL_ACCOUNT_DEFAULT = "nomadlabsupport@gmail.com";
+function getContactFromEmail(): string {
+  const from = process.env.CONTACT_FROM_EMAIL?.trim();
+  if (from) return from;
+  return `${APP_NAME} <noreply@cloudflowriver.com>`;
+}
 
-/**
- * ブラウザにログイン中の Gmail アカウント番号（0=プライマリ、1=2つ目＝事業用想定）。
- * メールアドレス直指定パスは Google がプライマリへリダイレクトするため /u/{n}/ を使う。
- */
-const SUPPORT_GMAIL_ACCOUNT_INDEX_DEFAULT = "1";
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
-/**
- * 事業用 Google アカウントで Gmail 作成画面を開く URL。
- * /mail/u/{index}/ でセッション内のアカウント枠を指定する。
- */
-function buildSupportGmailComposeUrl(
-  customerEmail: string,
-  replySubject: string,
-): string {
-  const rawIndex =
-    process.env.SUPPORT_GMAIL_ACCOUNT_INDEX?.trim() ||
-    SUPPORT_GMAIL_ACCOUNT_INDEX_DEFAULT;
-  const accountIndex = /^\d+$/.test(rawIndex) ? rawIndex : SUPPORT_GMAIL_ACCOUNT_INDEX_DEFAULT;
+async function sendContactEmail(params: {
+  to: string;
+  replyTo: string;
+  name: string;
+  type: string;
+  message: string;
+}): Promise<void> {
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  if (!apiKey) {
+    console.error('[contact] RESEND_API_KEY is not set');
+    throw new Error('メール送信の設定エラーです（RESEND_API_KEY）。');
+  }
 
-  return (
-    `https://mail.google.com/mail/u/${accountIndex}/` +
-    `?view=cm&fs=1` +
-    `&to=${encodeURIComponent(customerEmail)}` +
-    `&su=${encodeURIComponent(replySubject)}`
-  );
+  const subject = `【${APP_NAME}】お問い合わせ: ${params.type || '一般'}`;
+  const textBody = [
+    `${APP_NAME} にお問い合わせが届きました。`,
+    '',
+    `お名前: ${params.name}`,
+    `メールアドレス: ${params.replyTo}`,
+    `種別: ${params.type || '（未選択）'}`,
+    '',
+    '--- お問い合わせ内容 ---',
+    params.message,
+    '',
+    `通知先: ${params.to}`,
+  ].join('\n');
+
+  const htmlBody = `
+    <div style="font-family:sans-serif;line-height:1.6;color:#0f172a">
+      <h2 style="margin:0 0 12px">${escapeHtml(APP_NAME)}｜新しいお問い合わせ</h2>
+      <p style="margin:0 0 8px"><strong>お名前:</strong> ${escapeHtml(params.name)}</p>
+      <p style="margin:0 0 8px"><strong>メールアドレス:</strong> ${escapeHtml(params.replyTo)}</p>
+      <p style="margin:0 0 16px"><strong>種別:</strong> ${escapeHtml(params.type || '（未選択）')}</p>
+      <div style="padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;white-space:pre-wrap">${escapeHtml(params.message)}</div>
+      <p style="margin:16px 0 0;font-size:12px;color:#64748b">このメールに返信すると、お客様（${escapeHtml(params.replyTo)}）へ返信できます。</p>
+    </div>
+  `;
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'User-Agent': 'fleama-maker-contact/1.0',
+    },
+    body: JSON.stringify({
+      from: getContactFromEmail(),
+      to: [params.to],
+      reply_to: params.replyTo,
+      subject,
+      text: textBody,
+      html: htmlBody,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    console.error('[contact] Resend email failed:', res.status, body);
+    throw new Error('お問い合わせメールの送信に失敗しました。');
+  }
 }
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as ContactBody;
-    const name = (body.name ?? "").trim();
-    const email = (body.email ?? "").trim();
-    const subject = (body.subject ?? "一般のお問い合わせ").trim();
-    const message = (body.message ?? "").trim();
-    const kind = (body.kind ?? "").trim();
+    const { name, email, type, message } = await request.json();
 
-    if (!name || !email || !message) {
+    if (!email || !message) {
       return NextResponse.json(
-        { error: "お名前・メール・内容は必須です。" },
-        { status: 400 },
+        { error: 'メールアドレスとお問い合わせ内容は必須です。' },
+        { status: 400 }
       );
     }
 
-    if (!isValidEmail(email)) {
-      return NextResponse.json(
-        { error: "メールアドレスの形式が正しくありません。" },
-        { status: 400 },
-      );
+    const contactEmail = getContactEmail();
+    if (!contactEmail.includes('@')) {
+      console.error('[contact] CONTACT_EMAIL is invalid:', contactEmail);
+      return NextResponse.json({ error: 'サーバー側の設定エラーです。' }, { status: 500 });
     }
 
-    if (message.length > 4000) {
-      return NextResponse.json(
-        { error: "内容が長すぎます。" },
-        { status: 400 },
-      );
-    }
+    const trimmedEmail = String(email).trim();
+    const displayName = name?.trim() ? String(name).trim() : '（未入力）';
+    const inquiryType = type ? String(type).trim() : '';
+    const inquiryMessage = String(message).trim();
 
-    const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
-    const isCancel = kind === "cancel";
-    const replySubject = `【お問い合わせへの返信】${SITE_NAME}`;
-    const gmailComposeUrl = buildSupportGmailComposeUrl(email, replySubject);
-    const supportAccount =
-      process.env.SUPPORT_GMAIL_ACCOUNT?.trim() || SUPPORT_GMAIL_ACCOUNT_DEFAULT;
-    const supportAccountIndex =
-      process.env.SUPPORT_GMAIL_ACCOUNT_INDEX?.trim() ||
-      SUPPORT_GMAIL_ACCOUNT_INDEX_DEFAULT;
-    const embedMessage =
-      message.length > 1000 ? `${message.slice(0, 997)}...` : message;
-
-    // Discord 未設定でもフォーム送信は受け付ける（暫定）
-    if (!webhookUrl) {
-      Sentry.captureMessage(
-        scrubPiiText(
-          `[contact-pending] ${kind || "contact"} / ${subject} / ${name} / ${email}`,
-        ),
-        "info",
-      );
-      console.info("[contact] accepted (Discord webhook not configured)", {
-        subject,
-        kind: kind || "contact",
-        nameLength: name.length,
-        messageLength: message.length,
-      });
-      return NextResponse.json({
-        ok: true,
-        notice: "通知連携は準備中のため、運営側ログで受付しています",
-      });
-    }
-
-    const discordRes = await fetch(webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: SITE_NAME,
-        embeds: [
-          {
-            title: isCancel
-              ? "📩 新しい解約申請が届きました"
-              : "📩 新しいお問い合わせが届きました",
-            color: 3447003,
-            // **[text](url)** だと Discord がハイパーリンク化しないことがあるため、
-            // リンク自体は太字で囲まず、インラインコードでメールをコピーしやすくする
-            description: [
-              "👤 **送信者メールアドレス:**",
-              `\`${email}\` (クリックでコピー)`,
-              "",
-              `🚀 [✉️ 事業用Gmailで返信画面を開く](${gmailComposeUrl})`,
-              `_送信元: \`${supportAccount}\`（アカウント枠 /u/${supportAccountIndex}/）_`,
-            ].join("\n"),
-            fields: [
-              {
-                name: "お名前",
-                value: `${name} 様`,
-                inline: true,
-              },
-              {
-                name: "メールアドレス",
-                value: `\`${email}\``,
-                inline: true,
-              },
-              {
-                name: "件名",
-                value: subject,
-                inline: false,
-              },
-              {
-                name: "お問い合わせ内容",
-                value: embedMessage,
-              },
-              {
-                name: "返信アクション",
-                value: `[✉️ 事業用Gmailで返信画面を開く](${gmailComposeUrl})`,
-              },
-            ],
-          },
-        ],
-      }),
+    await sendContactEmail({
+      to: contactEmail,
+      replyTo: trimmedEmail,
+      name: displayName,
+      type: inquiryType,
+      message: inquiryMessage,
     });
 
-    if (!discordRes.ok) {
-      const text = await discordRes.text();
-      Sentry.captureMessage(
-        `Discord webhook failed: ${discordRes.status} ${scrubPiiText(text)}`,
-        "error",
-      );
-      // 連携失敗時も受付として返す（暫定運用）
-      return NextResponse.json({
-        ok: true,
-        notice: "受付完了（通知連携は一時的に遅延する場合があります）",
-      });
-    }
-
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ success: true, notified: contactEmail });
   } catch (error) {
-    Sentry.captureException(error);
-    return NextResponse.json(
-      { error: "送信中にエラーが発生しました。" },
-      { status: 500 },
-    );
+    console.error('Contact Error:', error);
+    const message =
+      error instanceof Error && /RESEND_API_KEY|メール送信の設定/.test(error.message)
+        ? 'サーバー側のメール設定エラーです。管理者にお問い合わせください。'
+        : '送信中にエラーが発生しました。';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

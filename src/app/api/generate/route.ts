@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { generateListing } from "@/lib/gemini";
+import { sendGA4Event } from "@/lib/ga4-mp";
 import { computeSeoInsights } from "@/lib/seo-insights";
 import {
   CATEGORIES,
@@ -83,6 +84,14 @@ export async function POST(request: Request) {
       trendSeo: Boolean(body.premiumFeatures?.trendSeo),
       proCopyQuality: Boolean(body.proCopyQuality || body.includeInsights),
     });
+
+    try {
+      await sendGA4Event("item_analyzed", {
+        event_category: "fleamarket",
+      });
+    } catch (gaError) {
+      console.error("GA4 send error:", gaError);
+    }
 
     if (body.includeInsights) {
       return NextResponse.json({

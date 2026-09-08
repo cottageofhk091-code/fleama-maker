@@ -44,3 +44,6 @@ next-env.d.ts
 
 # local stripe customer mapping (session → cus_*)
 .data/
+
+.vercel
+.env*

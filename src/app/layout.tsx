@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Noto_Sans_JP, Zen_Maru_Gothic } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import { ThemeProvider } from "@/components/theme-provider";
 import { BillingProvider } from "@/components/billing/billing-provider";
 import { Header } from "@/components/header";
@@ -81,6 +82,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             <Header />
             <main className="flex-1">{children}</main>
             <Footer />
+            <Analytics />
           </BillingProvider>
         </ThemeProvider>
       </body>
