@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { generateListing } from "@/lib/gemini";
 import { sendGA4Event } from "@/lib/ga4-mp";
 import { computeSeoInsights } from "@/lib/seo-insights";
+import { getSupabase } from "@/lib/supabase";
 import {
   CATEGORIES,
   CONDITIONS,
@@ -10,6 +11,8 @@ import {
 } from "@/lib/types";
 import type { ProductInput } from "@/lib/types";
 import * as Sentry from "@sentry/nextjs";
+
+export const maxDuration = 60;
 
 function isProductInput(body: unknown): body is ProductInput {
   if (!body || typeof body !== "object") return false;
@@ -91,6 +94,22 @@ export async function POST(request: Request) {
       });
     } catch (gaError) {
       console.error("GA4 send error:", gaError);
+    }
+
+    const supabase = getSupabase();
+    if (supabase) {
+      void supabase
+        .from("app_logs")
+        .insert([
+          {
+            app_name: "fleamarket",
+            user_type: "unregistered",
+            action_type: "analyze_item",
+          },
+        ])
+        .then(({ error }) => {
+          if (error) console.error("Supabase log error:", error);
+        });
     }
 
     if (body.includeInsights) {
