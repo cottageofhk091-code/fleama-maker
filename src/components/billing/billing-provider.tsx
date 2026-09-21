@@ -13,22 +13,33 @@ import {
 } from "react";
 import {
   FREE_TEMPLATE_LIMIT,
-  PRICING,
+  PROFILE_PLAN,
   createDefaultBillingState,
   getQuotaSnapshot,
   loadBillingState,
-  purchaseTicketPack,
   registerAsFree,
   saveBillingState,
   saveTemplate,
   tryConsumeGeneration,
-  upgradeToPremium,
   upgradeToPro,
   type BillingState,
   type ConsumeSource,
   type PlanId,
   type QuotaSnapshot,
 } from "@/lib/billing";
+import {
+  getDevPersona,
+  isDevPersonaEnabled,
+  setDevPersona as persistDevPersona,
+  subscribeDevPersona,
+  type DevPersona,
+} from "@/lib/billing/dev-persona";
+import {
+  consumeProTrialRemote,
+  loadHasUsedProTrialFromServer,
+  persistAnalyticsProfile,
+} from "@/lib/analytics-profile-client";
+import { useAuth } from "@/components/auth-provider";
 
 type BillingContextValue = {
   ready: boolean;
@@ -37,38 +48,68 @@ type BillingContextValue = {
   paywallOpen: boolean;
   openPaywall: () => void;
   closePaywall: () => void;
-  /**
-   * Reserve a generation slot before calling the API.
-   * Returns false when blocked (paywall opened).
-   */
+  pricingOpen: boolean;
+  openPricing: () => void;
+  closePricing: () => void;
   reserveGeneration: () =>
     | { ok: true; source: ConsumeSource }
     | { ok: false };
-  /** Roll back a reserved slot if API generation failed */
   rollbackReservation: (source: ConsumeSource) => void;
-  upgradePremium: () => void;
   upgradePro: () => void;
-  buyTicketPack: () => void;
   becomeFreeUser: () => void;
-  /** Demo helper: switch plan without payment */
   setPlanForDemo: (plan: PlanId) => void;
-  /** Persist Stripe Customer ID for portal access */
+  devPersona: DevPersona | null;
+  setDevPersona: (persona: DevPersona | null) => void;
   setStripeCustomerId: (customerId: string | null) => void;
   trySaveTemplate: (
     name: string,
     payload: Record<string, unknown>,
   ) => { ok: true } | { ok: false; reason: "template_limit" };
+  /** Pro 1回お試しを開始（解放 + 消費マーク） */
+  startProTrial: () => Promise<boolean>;
+  /** 課金 Pro またはお試しで解放できれば true */
+  ensureProTrialOrPaid: () => Promise<boolean>;
+  /** お試しセッションを終了（次回からモザイク） */
+  endProTrialSession: () => void;
 };
 
 const BillingContext = createContext<BillingContextValue | null>(null);
 
+function applyDevPersonaToState(
+  state: BillingState,
+  persona: DevPersona | null,
+): BillingState {
+  if (!persona) return state;
+  if (persona === "unauthenticated") {
+    return { ...state, plan: "visitor", hasUsedProTrial: true };
+  }
+  if (persona === "free") {
+    return {
+      ...state,
+      plan: "free",
+      hasUsedProTrial: false,
+    };
+  }
+  return { ...state, plan: "pro" };
+}
+
 export function BillingProvider({ children }: { children: ReactNode }) {
+  const { user, ready: authReady } = useAuth();
   const [ready, setReady] = useState(false);
   const [state, setState] = useState<BillingState>(() =>
     createDefaultBillingState("visitor"),
   );
   const [paywallOpen, setPaywallOpen] = useState(false);
+  const [pricingOpen, setPricingOpen] = useState(false);
+  const [devPersona, setDevPersonaState] = useState<DevPersona | null>(null);
+  const [proTrialActive, setProTrialActive] = useState(false);
   const stateRef = useRef(state);
+  const trialConsumingRef = useRef(false);
+
+  const persist = useCallback((next: BillingState) => {
+    stateRef.current = next;
+    setState(next);
+  }, []);
 
   useEffect(() => {
     stateRef.current = state;
@@ -83,38 +124,107 @@ export function BillingProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (!isDevPersonaEnabled()) return;
+    setDevPersonaState(getDevPersona());
+    return subscribeDevPersona((next) => {
+      setDevPersonaState(next);
+    });
+  }, []);
+
+  useEffect(() => {
     if (!ready) return;
     saveBillingState(state);
   }, [state, ready]);
 
-  const quota = useMemo(() => getQuotaSnapshot(state), [state]);
+  // ログイン済みなら visitor → free へ昇格し、お試しフラグをサーバー同期
+  useEffect(() => {
+    if (!ready || !authReady) return;
+    if (!user?.id) {
+      setProTrialActive(false);
+      return;
+    }
 
-  const persist = useCallback((next: BillingState) => {
-    stateRef.current = next;
-    setState(next);
-  }, []);
+    let cancelled = false;
+    void (async () => {
+      const remote = await loadHasUsedProTrialFromServer(user.id);
+      if (cancelled) return;
+
+      const current = stateRef.current;
+      const nextPlan =
+        current.plan === "visitor" || current.plan === "free"
+          ? ("free" as const)
+          : current.plan;
+      const hasUsed =
+        remote == null ? Boolean(current.hasUsedProTrial) : remote;
+
+      persist({
+        ...current,
+        plan: nextPlan === "premium" ? "pro" : nextPlan,
+        hasUsedProTrial: hasUsed,
+      });
+
+      if (current.plan === "visitor") {
+        persistAnalyticsProfile({
+          user_id: user.id,
+          plan_type: PROFILE_PLAN.free,
+          has_used_pro_trial: hasUsed,
+        });
+      }
+
+      if (hasUsed) setProTrialActive(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, authReady, user?.id, persist]);
+
+  const effectiveState = useMemo(
+    () => applyDevPersonaToState(state, devPersona),
+    [state, devPersona],
+  );
+
+  const isAuthenticated =
+    Boolean(user) || devPersona === "free" || devPersona === "paid";
+
+  const quota = useMemo(
+    () =>
+      getQuotaSnapshot(effectiveState, {
+        proTrialActive,
+        isAuthenticated,
+      }),
+    [effectiveState, proTrialActive, isAuthenticated],
+  );
+
+  const openPaywall = useCallback(() => setPaywallOpen(true), []);
+  const closePaywall = useCallback(() => setPaywallOpen(false), []);
+  const openPricing = useCallback(() => setPricingOpen(true), []);
+  const closePricing = useCallback(() => setPricingOpen(false), []);
 
   const reserveGeneration = useCallback(() => {
-    const result = tryConsumeGeneration(stateRef.current);
+    const result = tryConsumeGeneration(
+      applyDevPersonaToState(stateRef.current, getDevPersona()),
+    );
     if (!result.ok) {
       setPaywallOpen(true);
-      persist(result.state);
       return { ok: false as const };
     }
-    persist(result.state);
+    if (!getDevPersona()) {
+      persist(result.state);
+    }
     return { ok: true as const, source: result.source };
   }, [persist]);
 
-  // 開発バイパス時は Paywall を自動で閉じる（スクショ用）
   useEffect(() => {
     if (!ready) return;
-    if (quota.isPro && paywallOpen) {
+    if (quota.isPaidPro && paywallOpen) {
       setPaywallOpen(false);
     }
-  }, [ready, quota.isPro, paywallOpen]);
+  }, [ready, quota.isPaidPro, paywallOpen]);
 
   const rollbackReservation = useCallback(
     (source: ConsumeSource) => {
+      if (getDevPersona()) return;
       const prev = stateRef.current;
       if (source === "premium") return;
       if (source === "ticket") {
@@ -138,72 +248,186 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     [persist],
   );
 
+  const setPlanForDemo = useCallback(
+    (plan: PlanId) => {
+      const normalized = plan === "premium" ? "pro" : plan;
+      const current = stateRef.current;
+      persist({
+        ...createDefaultBillingState(normalized),
+        ticketBalance: normalized === "pro" ? 0 : current.ticketBalance,
+        stripeCustomerId: current.stripeCustomerId,
+        hasUsedProTrial: normalized === "free" ? false : current.hasUsedProTrial,
+        templates:
+          normalized === "visitor"
+            ? []
+            : current.templates.slice(
+                0,
+                normalized === "free" ? FREE_TEMPLATE_LIMIT : undefined,
+              ),
+      });
+      setPaywallOpen(false);
+      setProTrialActive(false);
+      if (normalized === "free") {
+        persistAnalyticsProfile({
+          plan_type: PROFILE_PLAN.free,
+          has_used_pro_trial: false,
+        });
+      } else if (normalized === "pro") {
+        persistAnalyticsProfile({ plan_type: PROFILE_PLAN.paid });
+      }
+    },
+    [persist],
+  );
+
+  const setDevPersona = useCallback(
+    (persona: DevPersona | null) => {
+      persistDevPersona(persona);
+      setDevPersonaState(persona);
+      if (persona === "unauthenticated") {
+        setPlanForDemo("visitor");
+      } else if (persona === "free") {
+        setPlanForDemo("free");
+      } else if (persona === "paid") {
+        setPlanForDemo("pro");
+      }
+    },
+    [setPlanForDemo],
+  );
+
+  const startProTrial = useCallback(async () => {
+    const persona = getDevPersona();
+    const authenticated =
+      Boolean(user) || persona === "free" || persona === "paid";
+    const snap = getQuotaSnapshot(
+      applyDevPersonaToState(stateRef.current, persona),
+      { proTrialActive, isAuthenticated: authenticated },
+    );
+
+    if (snap.isPaidPro) return true;
+    if (proTrialActive) return true;
+    if (snap.hasUsedProTrial && !proTrialActive) return false;
+    if (!authenticated) return false;
+
+    // visitor のままなら free に昇格してからお試し
+    if (stateRef.current.plan === "visitor" && !persona) {
+      persist({
+        ...registerAsFree(stateRef.current),
+        hasUsedProTrial: false,
+      });
+    }
+
+    if (trialConsumingRef.current) return true;
+    trialConsumingRef.current = true;
+    try {
+      setProTrialActive(true);
+      persist({
+        ...stateRef.current,
+        plan:
+          stateRef.current.plan === "visitor" ? "free" : stateRef.current.plan,
+        hasUsedProTrial: true,
+      });
+      if (persona !== "free") {
+        await consumeProTrialRemote(user?.id);
+      }
+      return true;
+    } finally {
+      trialConsumingRef.current = false;
+    }
+  }, [persist, proTrialActive, user]);
+
+  const ensureProTrialOrPaid = useCallback(async () => {
+    const persona = getDevPersona();
+    const authenticated =
+      Boolean(user) || persona === "free" || persona === "paid";
+    const snap = getQuotaSnapshot(
+      applyDevPersonaToState(stateRef.current, persona),
+      { proTrialActive, isAuthenticated: authenticated },
+    );
+    if (snap.isPro) return true;
+    if (snap.canUseProTrial || (authenticated && !snap.hasUsedProTrial)) {
+      return startProTrial();
+    }
+    return false;
+  }, [proTrialActive, startProTrial, user]);
+
+  const endProTrialSession = useCallback(() => {
+    setProTrialActive(false);
+  }, []);
+
   const value = useMemo<BillingContextValue>(
     () => ({
       ready,
-      state,
+      state: effectiveState,
       quota,
       paywallOpen,
-      openPaywall: () => setPaywallOpen(true),
-      closePaywall: () => setPaywallOpen(false),
+      openPaywall,
+      closePaywall,
+      pricingOpen,
+      openPricing,
+      closePricing,
       reserveGeneration,
       rollbackReservation,
-      upgradePremium: () => {
-        persist(upgradeToPremium(stateRef.current));
-        setPaywallOpen(false);
-      },
       upgradePro: () => {
         persist(upgradeToPro(stateRef.current));
         setPaywallOpen(false);
-      },
-      buyTicketPack: () => {
-        persist(
-          purchaseTicketPack(stateRef.current, PRICING.ticketPackCount),
-        );
-        setPaywallOpen(false);
+        setProTrialActive(false);
+        persistAnalyticsProfile({ plan_type: PROFILE_PLAN.paid });
       },
       becomeFreeUser: () => {
-        persist(registerAsFree(stateRef.current));
-      },
-      setPlanForDemo: (plan) => {
-        const current = stateRef.current;
         persist({
-          ...createDefaultBillingState(plan),
-          ticketBalance:
-            plan === "premium" || plan === "pro" ? 0 : current.ticketBalance,
-          stripeCustomerId: current.stripeCustomerId,
-          templates:
-            plan === "visitor"
-              ? []
-              : current.templates.slice(
-                  0,
-                  plan === "free" ? FREE_TEMPLATE_LIMIT : undefined,
-                ),
+          ...registerAsFree(stateRef.current),
+          hasUsedProTrial: false,
         });
-        setPaywallOpen(false);
+        setProTrialActive(false);
+        persistAnalyticsProfile({
+          plan_type: PROFILE_PLAN.free,
+          has_used_pro_trial: false,
+        });
       },
+      setPlanForDemo,
+      devPersona,
+      setDevPersona,
       setStripeCustomerId: (customerId) => {
-        const next = customerId?.trim() || undefined;
+        const nextId = customerId?.trim() || undefined;
         persist({
           ...stateRef.current,
-          stripeCustomerId: next,
+          stripeCustomerId: nextId,
         });
       },
       trySaveTemplate: (name, payload) => {
-        const result = saveTemplate(stateRef.current, { name, payload });
+        const result = saveTemplate(
+          applyDevPersonaToState(stateRef.current, getDevPersona()),
+          { name, payload },
+        );
         if (!result.ok) return result;
-        persist(result.state);
+        if (!getDevPersona()) {
+          persist(result.state);
+        }
         return { ok: true as const };
       },
+      startProTrial,
+      ensureProTrialOrPaid,
+      endProTrialSession,
     }),
     [
       ready,
-      state,
+      effectiveState,
       quota,
       paywallOpen,
+      pricingOpen,
+      openPaywall,
+      closePaywall,
+      openPricing,
+      closePricing,
       reserveGeneration,
       rollbackReservation,
       persist,
+      setPlanForDemo,
+      devPersona,
+      setDevPersona,
+      startProTrial,
+      ensureProTrialOrPaid,
+      endProTrialSession,
     ],
   );
 

@@ -1,11 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { FileText, Hash, Lock, Type } from "lucide-react";
+import { FileText, Hash, Type } from "lucide-react";
 import type { BoostPatternId, GenerateResult } from "@/lib/types";
-import { pickRecommendedBoostId, RECOMMENDED_BADGE } from "@/lib/boost-patterns";
+import { pickRecommendedBoostId } from "@/lib/boost-patterns";
 import { BoostPatternPicker } from "@/components/boost-pattern-picker";
-import { SoldProBoostGateModal } from "@/components/soldpro-boost-gate-modal";
+import { ProRestrictedOverlay } from "@/components/billing/pro-restricted-overlay";
 import { useBilling } from "@/components/billing/billing-provider";
 import { CopyButton } from "./copy-button";
 
@@ -31,7 +31,6 @@ function buildFullDescription(
 export function ResultPanel({ result }: Props) {
   const { quota } = useBilling();
   const isPro = quota.isPro;
-  const [gateOpen, setGateOpen] = useState(false);
 
   const brand = result.identifiedBrand?.trim() || "";
   const product = result.identifiedProduct || result.titles[0]?.title || "商品";
@@ -149,69 +148,48 @@ export function ResultPanel({ result }: Props) {
         </pre>
       </div>
 
-      {/* 販促ブースト — Proのみフル解放 */}
-      {patterns.length > 0 && (
-        <div className="relative overflow-hidden rounded-2xl border border-orange-200/80 bg-gradient-to-br from-orange-50 to-amber-50 p-5 shadow-sm dark:border-orange-900/50 dark:from-orange-950/40 dark:to-amber-950/30 sm:p-6">
-          {isPro ? (
-            <>
-              <BoostPatternPicker
-                patterns={patterns}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
-              />
-              <div className="mt-3 flex justify-end">
-                <CopyButton
-                  text={selectedComment}
-                  label="選択中ブーストをコピー"
-                  size="md"
+      {/* 販促ブースト — Proのみフル解放（無料はモザイク・実データ非表示） */}
+      {(patterns.length > 0 || !isPro) && (
+        <ProRestrictedOverlay
+          locked={!isPro}
+          className="rounded-2xl border border-orange-200/80 bg-gradient-to-br from-orange-50 to-amber-50 shadow-sm dark:border-orange-900/50 dark:from-orange-950/40 dark:to-amber-950/30"
+          minHeightClass="min-h-[240px]"
+        >
+          <div className="p-5 sm:p-6">
+            {isPro ? (
+              <>
+                <BoostPatternPicker
+                  patterns={patterns}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
                 />
-              </div>
-            </>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setGateOpen(true)}
-              className="relative block w-full text-left"
-            >
-              <div className="pointer-events-none select-none" aria-hidden>
-                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                <div className="mt-3 flex justify-end">
+                  <CopyButton
+                    text={selectedComment}
+                    label="選択中ブーストをコピー"
+                    size="md"
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="space-y-3" aria-hidden>
+                <h3 className="font-display text-base font-semibold">
                   販促ブースト文（3パターン）
-                </p>
-                <p className="mt-1 text-xs text-slate-500">
-                  Sold Pro 限定 — タップして解放
-                </p>
-                <ul className="mt-3 space-y-2.5">
-                  {patterns.map((p) => (
-                    <li
-                      key={p.id}
-                      className="rounded-xl border border-orange-200/60 bg-white/70 p-3 dark:border-orange-900/40 dark:bg-slate-950/40"
+                </h3>
+                {["価値訴求サンプル文面です", "スピード訴求サンプル文面です", "信頼訴求サンプル文面です"].map(
+                  (text) => (
+                    <div
+                      key={text}
+                      className="rounded-xl border border-slate-200 bg-white p-3.5 text-sm dark:border-slate-700 dark:bg-slate-950"
                     >
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
-                          {p.label}
-                        </span>
-                        {p.recommended && (
-                          <span className="rounded-full bg-orange-500 px-2 py-0.5 text-[10px] font-bold text-white blur-[2px]">
-                            {RECOMMENDED_BADGE}
-                          </span>
-                        )}
-                      </div>
-                      <p className="mt-2 text-sm leading-relaxed text-slate-700 blur-[6px] dark:text-slate-200">
-                        {p.comment}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
+                      {text}
+                    </div>
+                  ),
+                )}
               </div>
-              <div className="absolute inset-0 flex items-center justify-center bg-white/30 backdrop-blur-[2px] dark:bg-slate-950/35">
-                <span className="inline-flex items-center gap-2 rounded-xl bg-[#001F3F] px-4 py-3 text-sm font-semibold text-[#D4AF37] shadow-lg">
-                  <Lock className="h-4 w-4" />
-                  Sold Pro で売却ブーストを解放
-                </span>
-              </div>
-            </button>
-          )}
-        </div>
+            )}
+          </div>
+        </ProRestrictedOverlay>
       )}
 
       {result.hashtags.length > 0 && (
@@ -240,11 +218,6 @@ export function ResultPanel({ result }: Props) {
           </div>
         </div>
       )}
-
-      <SoldProBoostGateModal
-        open={gateOpen && !isPro}
-        onClose={() => setGateOpen(false)}
-      />
     </section>
   );
 }

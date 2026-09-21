@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
+import { logAnalysisEvent } from "@/lib/analytics";
 import { generateListing } from "@/lib/gemini";
 import { sendGA4Event } from "@/lib/ga4-mp";
 import { computeSeoInsights } from "@/lib/seo-insights";
-import { getSupabase } from "@/lib/supabase";
+import { getOrCreateUserId } from "@/lib/user-session";
 import {
   CATEGORIES,
   CONDITIONS,
@@ -55,6 +56,7 @@ export async function POST(request: Request) {
       premiumFeatures?: { trendSeo?: boolean };
       includeInsights?: boolean;
       proCopyQuality?: boolean;
+      isTrial?: boolean;
     };
     if (!isProductInput(body)) {
       return NextResponse.json(
@@ -96,20 +98,20 @@ export async function POST(request: Request) {
       console.error("GA4 send error:", gaError);
     }
 
-    const supabase = getSupabase();
-    if (supabase) {
-      void supabase
-        .from("app_logs")
-        .insert([
-          {
-            app_name: "fleamarket",
-            user_type: "unregistered",
-            action_type: "analyze_item",
-          },
-        ])
-        .then(({ error }) => {
-          if (error) console.error("Supabase log error:", error);
-        });
+    try {
+      const { userId } = await getOrCreateUserId();
+      void logAnalysisEvent({
+        user_id: userId,
+        metadata: {
+          category: input.category,
+          brand: input.brand,
+          include_insights: Boolean(body.includeInsights),
+          source: "generate",
+          is_trial: Boolean(body.isTrial),
+        },
+      });
+    } catch (analyticsError) {
+      console.error("Analytics event log error:", analyticsError);
     }
 
     if (body.includeInsights) {

@@ -18,8 +18,7 @@ type SubStatus = {
 export function AccountClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { ready, quota, upgradePro, upgradePremium, buyTicketPack, setPlanForDemo } =
-    useBilling();
+  const { ready, quota, upgradePro } = useBilling();
   const [cancelOpen, setCancelOpen] = useState(false);
   const [sub, setSub] = useState<SubStatus | null>(null);
   const [subLoading, setSubLoading] = useState(true);
@@ -71,16 +70,12 @@ export function AccountClient() {
         if (cancelled) return;
 
         const planType = data.planType || planHint || "pro";
-        if (planType === "premium") {
-          upgradePremium();
-          setSyncMessage("Sold プレミアムへの加入が完了しました。");
-        } else if (planType === "ticket_10") {
-          buyTicketPack();
-          setSyncMessage("10回分チケットの購入が完了しました。");
-        } else {
-          upgradePro();
-          setSyncMessage("Sold Proへの加入が完了しました。");
-        }
+        upgradePro();
+        setSyncMessage(
+          planType === "pro"
+            ? "Sold Pro（有料）への加入が完了しました。"
+            : "有料プランへの加入が完了しました。",
+        );
         await refreshSubscription();
         router.replace("/account");
       } catch (err) {
@@ -94,14 +89,7 @@ export function AccountClient() {
     return () => {
       cancelled = true;
     };
-  }, [
-    searchParams,
-    upgradePro,
-    upgradePremium,
-    buyTicketPack,
-    refreshSubscription,
-    router,
-  ]);
+  }, [searchParams, upgradePro, refreshSubscription, router]);
 
   const isPro = quota.isPro;
   const hasStripeCustomer = Boolean(sub?.subscribed);
@@ -131,7 +119,7 @@ export function AccountClient() {
           <div>
             <p className="text-xs font-medium text-slate-500">現在のプラン</p>
             <p className="mt-1 font-display text-xl font-bold text-slate-900 dark:text-white">
-              {PLAN_LABELS[quota.plan]}
+              {PLAN_LABELS[quota.plan === "premium" ? "pro" : quota.plan]}
             </p>
             <p className="mt-1 text-xs text-slate-500">{quota.indicatorLabel}</p>
             <p className="mt-2 text-xs text-slate-500">
@@ -171,15 +159,7 @@ export function AccountClient() {
             ) : hasStripeCustomer ? (
               <SubscriptionManageButton mode="manage" />
             ) : (
-              <SubscriptionManageButton
-                mode="join"
-                onDemoUpgrade={() => {
-                  upgradePro();
-                  setSyncMessage(
-                    "（デモ）ローカルをProにしました。Stripe顧客IDは未紐付けです。",
-                  );
-                }}
-              />
+              <SubscriptionManageButton mode="join" />
             )}
           </div>
 
@@ -200,16 +180,6 @@ export function AccountClient() {
             </button>
           </div>
         </div>
-
-        {isPro && (
-          <button
-            type="button"
-            onClick={() => setPlanForDemo("free")}
-            className="mt-4 w-full text-center text-xs text-slate-500 underline-offset-2 hover:text-slate-300 hover:underline"
-          >
-            （デモ）ローカル状態を無料プランに戻す
-          </button>
-        )}
       </section>
 
       <p className="text-center text-xs text-slate-500">

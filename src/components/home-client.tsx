@@ -5,11 +5,11 @@ import { Bookmark, Layers, PenLine } from "lucide-react";
 import { ProductForm } from "@/components/product-form";
 import { ResultPanel } from "@/components/result-panel";
 import { LoadingOverlay } from "@/components/loading-overlay";
-import { QuotaIndicator } from "@/components/billing/quota-indicator";
 import { PaywallModal } from "@/components/billing/paywall-modal";
+import { ProRestrictedOverlay } from "@/components/billing/pro-restricted-overlay";
 import { useBilling } from "@/components/billing/billing-provider";
+import { AnalyticsVisitLogger } from "@/components/analytics-visit-logger";
 import { ProBulkDashboard } from "@/components/pro/pro-bulk-dashboard";
-import { ProUpgradeGate } from "@/components/pro/pro-upgrade-gate";
 import { SaleSpeedBadge, SeoScoreGauge } from "@/components/pro/seo-widgets";
 import { computeSeoInsights } from "@/lib/seo-insights";
 import { SITE_NAME, SITE_TAGLINE } from "@/lib/site";
@@ -35,7 +35,7 @@ export function HomeClient() {
       { input: lastInput, result },
     );
     if (!saved.ok) {
-      setTemplateMessage("テンプレート保存上限です。プレミアム/Proで無制限に。");
+      setTemplateMessage("テンプレート保存上限です。Proプランで無制限に。");
       openPaywall();
       return;
     }
@@ -45,6 +45,7 @@ export function HomeClient() {
 
   return (
     <>
+      <AnalyticsVisitLogger />
       {loading && <LoadingOverlay />}
       <PaywallModal />
 
@@ -96,7 +97,7 @@ export function HomeClient() {
               }`}
             >
               <Layers className="h-4 w-4" />
-              Pro 一括 / SEO予測
+              🔒 Proプラン（一括・SEO表示）
             </button>
           </div>
         </div>
@@ -104,14 +105,10 @@ export function HomeClient() {
 
       <div className="mx-auto max-w-5xl px-4 pb-16 sm:px-6">
         {tab === "pro" ? (
-          <div className="space-y-4">
-            <QuotaIndicator />
-            {quota.isPro ? <ProBulkDashboard /> : <ProUpgradeGate />}
-          </div>
+          <ProBulkDashboard />
         ) : (
           <div className="grid gap-6 lg:grid-cols-5">
             <div className="space-y-4 lg:col-span-2">
-              <QuotaIndicator />
               <ProductForm
                 disabled={loading}
                 onLoadingChange={setLoading}
@@ -153,16 +150,37 @@ export function HomeClient() {
                     </button>
                   </div>
 
-                  {quota.isPro && singleInsights && (
-                    <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-slate-200/80 bg-white/90 p-4 dark:border-slate-800 dark:bg-slate-900/80">
-                      <SeoScoreGauge score={singleInsights.seoScore} />
-                      <div className="min-w-0 flex-1 space-y-2">
-                        <SaleSpeedBadge speed={singleInsights.saleSpeed} />
-                        <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-                          {singleInsights.priceAdvice}
-                        </p>
-                      </div>
-                    </div>
+                  {result && (
+                    <ProRestrictedOverlay
+                      locked={!quota.isPro}
+                      className="rounded-2xl border border-slate-200/80 bg-white/90 dark:border-slate-800 dark:bg-slate-900/80"
+                      minHeightClass="min-h-[160px]"
+                    >
+                      {quota.isPro && singleInsights ? (
+                        <div className="flex flex-wrap items-center gap-4 p-4">
+                          <SeoScoreGauge score={singleInsights.seoScore} />
+                          <div className="min-w-0 flex-1 space-y-2">
+                            <SaleSpeedBadge speed={singleInsights.saleSpeed} />
+                            <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+                              {singleInsights.priceAdvice}
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          className="flex flex-wrap items-center gap-4 p-4"
+                          aria-hidden
+                        >
+                          <SeoScoreGauge score={86} />
+                          <div className="min-w-0 flex-1 space-y-2">
+                            <SaleSpeedBadge speed="24時間以内" />
+                            <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+                              SEOスコアと売却スピード予測のサンプル表示です。
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </ProRestrictedOverlay>
                   )}
 
                   {templateMessage && (

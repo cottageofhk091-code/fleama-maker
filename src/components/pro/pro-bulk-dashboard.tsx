@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Check,
   Copy,
@@ -35,6 +35,8 @@ import {
 import { SaleSpeedBadge, SeoScoreGauge } from "./seo-widgets";
 import { DescriptionReviewModal } from "./description-review-modal";
 import { CopyButton } from "@/components/copy-button";
+import { ProRestrictedOverlay } from "@/components/billing/pro-restricted-overlay";
+import { useBilling } from "@/components/billing/billing-provider";
 
 type CardStatus = "idle" | "queued" | "running" | "done" | "error";
 
@@ -115,12 +117,16 @@ const SAMPLE_ROWS: InputRow[] = [
 ];
 
 export function ProBulkDashboard() {
+  const { quota, openPricing, ensureProTrialOrPaid, endProTrialSession } =
+    useBilling();
+  const locked = !quota.isPro;
   const [rows, setRows] = useState<InputRow[]>(SAMPLE_ROWS);
   const [cards, setCards] = useState<BulkCard[]>([]);
   const [running, setRunning] = useState(false);
   const [copiedAll, setCopiedAll] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [reviewIndex, setReviewIndex] = useState<number | null>(null);
+  const trialRunRef = useRef(false);
 
   const overallProgress = useMemo(() => {
     if (cards.length === 0) return 0;
@@ -157,6 +163,15 @@ export function ProBulkDashboard() {
   }
 
   async function startBulk() {
+    const wasTrialSession = quota.proTrialActive || quota.canUseProTrial;
+    if (locked) {
+      const unlocked = await ensureProTrialOrPaid();
+      if (!unlocked) {
+        openPricing();
+        return;
+      }
+    }
+
     setFormError(null);
     const drafts = rowsToDraftItems(rows);
     const validation = validateBulkInputs(drafts);
@@ -172,9 +187,11 @@ export function ProBulkDashboard() {
     }));
     setCards(initial);
     setRunning(true);
+    trialRunRef.current = wasTrialSession || quota.proTrialActive;
 
     const concurrency = 3;
     let cursor = 0;
+    const isTrialRun = trialRunRef.current;
 
     async function worker() {
       while (cursor < initial.length) {
@@ -208,6 +225,7 @@ export function ProBulkDashboard() {
               premiumFeatures: { trendSeo: true },
               includeInsights: true,
               proCopyQuality: true,
+              isTrial: isTrialRun,
             }),
           });
           const data = await res.json();
@@ -256,6 +274,10 @@ export function ProBulkDashboard() {
       ),
     );
     setRunning(false);
+    if (trialRunRef.current) {
+      endProTrialSession();
+      trialRunRef.current = false;
+    }
   }
 
   async function copyAll() {
@@ -491,8 +513,8 @@ export function ProBulkDashboard() {
 
         <button
           type="button"
-          onClick={startBulk}
-          disabled={running || !allRowsReady}
+          onClick={() => void startBulk()}
+          disabled={running || (!locked && !allRowsReady)}
           className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-teal-500 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
         >
           {running ? (
@@ -500,12 +522,17 @@ export function ProBulkDashboard() {
           ) : (
             <Wand2 className="h-4 w-4" />
           )}
-          {running ? "一括生成中…" : "Sold Pro品質で一括生成"}
+          {locked
+            ? "🔒 一括生成（Pro限定）"
+            : running
+              ? "一括生成中…"
+              : "Sold Pro品質で一括生成"}
         </button>
       </div>
 
       {cards.length > 0 && (
-        <div className="space-y-4">
+        <ProRestrictedOverlay locked={locked} minHeightClass="min-h-[320px]">
+          <div className="space-y-4">
           <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -653,7 +680,40 @@ export function ProBulkDashboard() {
               </article>
             ))}
           </div>
-        </div>
+          </div>
+        </ProRestrictedOverlay>
+      )}
+
+      {locked && cards.length === 0 && (
+        <ProRestrictedOverlay locked minHeightClass="min-h-[280px]">
+          <div className="space-y-4 rounded-2xl border border-slate-200/80 bg-white/90 p-4 dark:border-slate-800 dark:bg-slate-900/80">
+            <div className="flex flex-wrap items-center gap-4">
+              <SeoScoreGauge score={86} />
+              <div className="min-w-0 flex-1 space-y-2">
+                <SaleSpeedBadge speed="24時間以内" />
+                <p className="text-xs text-slate-600 dark:text-slate-300">
+                  SEOスコアと売却スピード予測のプレビュー（サンプル）
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              {[1, 2].map((n) => (
+                <div
+                  key={n}
+                  className="rounded-xl border border-slate-100 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/50"
+                >
+                  <p className="text-xs font-semibold text-teal-700">#{n} 一括結果</p>
+                  <p className="mt-2 text-sm font-medium text-slate-800 dark:text-slate-100">
+                    サンプル商品タイトルがここに表示されます
+                  </p>
+                  <p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+                    購買促進ブースト・SEO予測つきの説明文プレビューです。
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </ProRestrictedOverlay>
       )}
 
       <DescriptionReviewModal

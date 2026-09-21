@@ -20,9 +20,10 @@ export function loadBillingState(): BillingState {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return createDefaultBillingState("visitor");
     const parsed = JSON.parse(raw) as Partial<BillingState>;
-    const base = createDefaultBillingState(
-      isPlanId(parsed.plan) ? parsed.plan : "visitor",
-    );
+    let plan: PlanId = isPlanId(parsed.plan) ? parsed.plan : "visitor";
+    // 旧プレミアムは有料 Pro に統合
+    if (plan === "premium") plan = "pro";
+    const base = createDefaultBillingState(plan);
     return syncBillingMonth({
       ...base,
       ticketBalance:
@@ -40,6 +41,7 @@ export function loadBillingState(): BillingState {
         parsed.stripeCustomerId.trim()
           ? parsed.stripeCustomerId.trim()
           : undefined,
+      hasUsedProTrial: Boolean(parsed.hasUsedProTrial),
     });
   } catch {
     return createDefaultBillingState("visitor");

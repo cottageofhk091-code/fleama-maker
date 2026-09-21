@@ -6,42 +6,25 @@ import { getSiteOrigin, getStripe } from "@/lib/stripe";
 import { getStripeCustomerIdForUser } from "@/lib/stripe-customer-store";
 import { getOrCreateUserId } from "@/lib/user-session";
 
-export type CheckoutPlanType = "pro" | "premium" | "ticket_10";
+export type CheckoutPlanType = "pro";
 
-const PLAN_TYPES: CheckoutPlanType[] = ["pro", "premium", "ticket_10"];
-
-function resolvePrice(planType: CheckoutPlanType): {
+function resolveProPrice(): {
   priceId: string | undefined;
   mode: Stripe.Checkout.SessionCreateParams.Mode;
   label: string;
   priceYen: number;
 } {
-  switch (planType) {
-    case "pro":
-      return {
-        priceId: sanitizePriceId(
-          process.env.STRIPE_PRICE_ID_SOLD_PRO ||
-            process.env.STRIPE_PRICE_ID_PRO,
-        ),
-        mode: "subscription",
-        label: "Sold Pro",
-        priceYen: PRICING.proMonthlyYen,
-      };
-    case "premium":
-      return {
-        priceId: sanitizePriceId(process.env.STRIPE_PRICE_ID_SOLD_PREMIUM),
-        mode: "subscription",
-        label: "Sold プレミアム",
-        priceYen: PRICING.premiumMonthlyYen,
-      };
-    case "ticket_10":
-      return {
-        priceId: sanitizePriceId(process.env.STRIPE_PRICE_ID_TICKET_10),
-        mode: "payment",
-        label: `${PRICING.ticketPackCount}回分チケット`,
-        priceYen: PRICING.ticketPackYen,
-      };
-  }
+  return {
+    // Pro は月額500円。既存の500円用 Price ID（SOLD_PREMIUM）を優先して使用
+    priceId: sanitizePriceId(
+      process.env.STRIPE_PRICE_ID_SOLD_PREMIUM ||
+        process.env.STRIPE_PRICE_ID_SOLD_PRO ||
+        process.env.STRIPE_PRICE_ID_PRO,
+    ),
+    mode: "subscription",
+    label: "Sold Pro",
+    priceYen: PRICING.proMonthlyYen,
+  };
 }
 
 /** プレースホルダ（price_xxxxxxxx）を未設定扱いにする */
@@ -54,8 +37,8 @@ function sanitizePriceId(raw: string | undefined): string | undefined {
 }
 
 /**
- * Create Stripe Checkout Session.
- * Body: { planType: "pro" | "premium" | "ticket_10" }
+ * Create Stripe Checkout Session for Sold Pro (paid) only.
+ * Body: { planType?: "pro" }
  */
 export async function POST(request: Request) {
   try {
@@ -72,25 +55,20 @@ export async function POST(request: Request) {
     const body = (await request.json().catch(() => ({}))) as {
       planType?: string;
     };
-    const planType = (body.planType ?? "pro").trim() as CheckoutPlanType;
-    if (!PLAN_TYPES.includes(planType)) {
+    const planType = (body.planType ?? "pro").trim();
+    if (planType !== "pro") {
       return NextResponse.json(
-        { error: "planType が不正です（pro / premium / ticket_10）。" },
+        { error: "現在のプランは Sold Pro（有料）のみです。" },
         { status: 400 },
       );
     }
 
-    const plan = resolvePrice(planType);
+    const plan = resolveProPrice();
     if (!plan.priceId) {
-      const envHint =
-        planType === "pro"
-          ? "STRIPE_PRICE_ID_SOLD_PRO"
-          : planType === "premium"
-            ? "STRIPE_PRICE_ID_SOLD_PREMIUM"
-            : "STRIPE_PRICE_ID_TICKET_10";
       return NextResponse.json(
         {
-          error: `${plan.label}の Price ID が未設定です。${envHint} を .env.local に設定してください。`,
+          error:
+            "Sold Pro（月額500円）の Price ID が未設定です。STRIPE_PRICE_ID_SOLD_PREMIUM または STRIPE_PRICE_ID_SOLD_PRO を設定してください。",
         },
         { status: 503 },
       );
@@ -121,7 +99,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const successUrl = `${origin}/account?checkout=success&plan=${planType}&session_id={CHECKOUT_SESSION_ID}`;
+    const successUrl = `${origin}/account?checkout=success&plan=pro&session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl = `${origin}/account?checkout=cancel`;
 
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
@@ -133,20 +111,17 @@ export async function POST(request: Request) {
       ...(existingCustomerId ? { customer: existingCustomerId } : {}),
       metadata: {
         appUserId: userId,
-        planType,
+        planType: "pro",
         priceYen: String(plan.priceYen),
       },
       allow_promotion_codes: true,
-    };
-
-    if (plan.mode === "subscription") {
-      sessionParams.subscription_data = {
+      subscription_data: {
         metadata: {
           appUserId: userId,
-          planType,
+          planType: "pro",
         },
-      };
-    }
+      },
+    };
 
     const session = await stripe.checkout.sessions.create(sessionParams);
 
@@ -157,7 +132,7 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({ url: session.url, planType });
+    return NextResponse.json({ url: session.url, planType: "pro" });
   } catch (error) {
     Sentry.captureException(error);
     const message =

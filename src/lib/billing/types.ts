@@ -25,6 +25,8 @@ export type BillingState = {
   templates: SavedTemplate[];
   /** Stripe Customer ID (cus_...) for Customer Portal */
   stripeCustomerId?: string;
+  /** Pro 1回お試しを消費済み（profiles.has_used_pro_trial と同期） */
+  hasUsedProTrial: boolean;
 };
 
 export type ConsumeResult =
@@ -43,8 +45,16 @@ export type QuotaSnapshot = {
   plan: PlanId;
   /** premium or pro — unlimited single generation + templates */
   isPremium: boolean;
-  /** Pro-only features (bulk + SEO insights dashboard) */
+  /** Pro-only features (bulk + SEO insights dashboard) — 課金 or お試し中 */
   isPro: boolean;
+  /** 課金 Pro（お試しロック解除を含まない） */
+  isPaidPro: boolean;
+  /** ログイン済み無料会員でまだお試し未使用 */
+  canUseProTrial: boolean;
+  /** お試し消費済み */
+  hasUsedProTrial: boolean;
+  /** 今回セッションでお試し解放中 */
+  proTrialActive: boolean;
   /** Remaining free/trial generations (Infinity for premium/pro) */
   freeRemaining: number;
   freeLimit: number;

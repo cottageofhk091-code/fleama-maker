@@ -5,11 +5,20 @@ export {
   VISITOR_TRIAL_LIMIT,
   PRO_BULK_MAX_ITEMS,
   PRICING,
+  PROFILE_PLAN,
   PLAN_LABELS,
   currentMonthKey,
   isUnlimitedPlan,
+  isPaidPlan,
 } from "./quotas";
 export { isDevProBypassEnabled } from "./dev-bypass";
+export {
+  getDevPersona,
+  setDevPersona,
+  isDevPersonaEnabled,
+  subscribeDevPersona,
+  type DevPersona,
+} from "./dev-persona";
 export {
   createDefaultBillingState,
   syncBillingMonth,

@@ -1,6 +1,6 @@
 /** Plan limits & pricing for フリマリスト Sold */
 
-/** Free plan monthly generation cap (within 5–10 range) */
+/** Free plan monthly generation cap */
 export const FREE_MONTHLY_LIMIT = 8;
 
 /** Visitor (unregistered) trial generations */
@@ -13,18 +13,21 @@ export const FREE_TEMPLATE_LIMIT = 2;
 export const PRO_BULK_MAX_ITEMS = 10;
 
 export const PRICING = {
-  /** Sold プレミアム 月額（税込・円） */
-  premiumMonthlyYen: 500,
-  /** Sold Pro 月額（税込・円） */
-  proMonthlyYen: 980,
-  ticketPackCount: 10,
-  ticketPackYen: 300,
+  /** Sold Pro（有料）月額（税込・円） */
+  proMonthlyYen: 500,
+} as const;
+
+/** Analytics / profiles 用のプラン種別 */
+export const PROFILE_PLAN = {
+  free: "free",
+  paid: "paid",
 } as const;
 
 export const PLAN_LABELS = {
   visitor: "お試し（未登録）",
   free: "無料プラン",
-  premium: "Sold プレミアム",
+  /** @deprecated 旧プレミアム — Pro 扱いへ移行 */
+  premium: "Sold Pro（移行済）",
   pro: "Sold Pro",
 } as const;
 
@@ -34,6 +37,12 @@ export function currentMonthKey(date = new Date()): string {
   return `${y}-${m}`;
 }
 
+/** 有料（Pro）のみ無制限。旧 premium も互換で無制限扱い */
 export function isUnlimitedPlan(plan: keyof typeof PLAN_LABELS): boolean {
-  return plan === "premium" || plan === "pro";
+  return plan === "pro" || plan === "premium";
+}
+
+/** 表示・課金上の Pro（有料）判定 */
+export function isPaidPlan(plan: keyof typeof PLAN_LABELS): boolean {
+  return plan === "pro" || plan === "premium";
 }

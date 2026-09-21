@@ -2,7 +2,10 @@ import type { Metadata } from "next";
 import { Noto_Sans_JP, Zen_Maru_Gothic } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { ThemeProvider } from "@/components/theme-provider";
+import { AuthProvider } from "@/components/auth-provider";
 import { BillingProvider } from "@/components/billing/billing-provider";
+import { PricingPlansModalHost } from "@/components/pricing-plans-modal";
+import { DevPlanSwitcher } from "@/components/billing/dev-plan-switcher";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import {
@@ -78,12 +81,16 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <ThemeProvider>
-          <BillingProvider>
-            <Header />
-            <main className="flex-1">{children}</main>
-            <Footer />
-            <Analytics />
-          </BillingProvider>
+          <AuthProvider>
+            <BillingProvider>
+              <Header />
+              <main className="flex-1">{children}</main>
+              <Footer />
+              <PricingPlansModalHost />
+              <DevPlanSwitcher />
+              <Analytics />
+            </BillingProvider>
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

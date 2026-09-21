@@ -1,7 +1,7 @@
-export type CheckoutPlanType = "pro" | "premium" | "ticket_10";
+export type CheckoutPlanType = "pro";
 
 export async function startCheckoutSession(
-  planType: CheckoutPlanType,
+  planType: CheckoutPlanType = "pro",
 ): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
   try {
     const res = await fetch("/api/stripe/checkout", {

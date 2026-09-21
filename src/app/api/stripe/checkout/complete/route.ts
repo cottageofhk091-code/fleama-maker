@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
+import { saveUserProfile } from "@/lib/analytics";
+import { PROFILE_PLAN } from "@/lib/billing";
 import { getStripe } from "@/lib/stripe";
 import { setStripeCustomerIdForUser } from "@/lib/stripe-customer-store";
 import { getOrCreateUserId } from "@/lib/user-session";
@@ -61,19 +63,17 @@ export async function POST(request: Request) {
       await setStripeCustomerIdForUser(userId, customerId);
     }
 
-    const planType =
-      session.metadata?.planType === "premium" ||
-      session.metadata?.planType === "ticket_10" ||
-      session.metadata?.planType === "pro"
-        ? session.metadata.planType
-        : session.mode === "payment"
-          ? "ticket_10"
-          : "pro";
+    const planType = "pro";
+
+    await saveUserProfile({
+      user_id: userId,
+      plan_type: PROFILE_PLAN.paid,
+    });
 
     return NextResponse.json({
       ok: true,
       planType,
-      subscribed: planType === "pro" || planType === "premium",
+      subscribed: true,
       customerIdHint: customerId
         ? `${customerId.slice(0, 7)}…${customerId.slice(-4)}`
         : null,

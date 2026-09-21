@@ -23,6 +23,7 @@ export function createDefaultBillingState(
     monthKey: currentMonthKey(),
     freeUsedThisMonth: 0,
     templates: [],
+    hasUsedProTrial: false,
   };
 }
 
@@ -97,18 +98,27 @@ export function tryConsumeGeneration(raw: BillingState): ConsumeResult {
   return { ok: false, reason: "limit_reached", state };
 }
 
-export function getQuotaSnapshot(raw: BillingState): QuotaSnapshot {
+export function getQuotaSnapshot(
+  raw: BillingState,
+  options?: { proTrialActive?: boolean; isAuthenticated?: boolean },
+): QuotaSnapshot {
   const state = syncBillingMonth(raw);
+  const proTrialActive = Boolean(options?.proTrialActive);
+  const isAuthenticated = Boolean(options?.isAuthenticated);
 
   if (isDevProBypassEnabled()) {
     return {
       plan: "pro",
       isPremium: true,
       isPro: true,
+      isPaidPro: true,
+      canUseProTrial: false,
+      hasUsedProTrial: true,
+      proTrialActive: false,
       freeRemaining: Number.POSITIVE_INFINITY,
       freeLimit: Number.POSITIVE_INFINITY,
       ticketBalance: state.ticketBalance,
-      indicatorLabel: "Sold Pro（開発バイパス）：一括生成・SEO予測つき無制限",
+      indicatorLabel: "Sold Pro：一括生成・SEO予測つき無制限",
       canGenerate: true,
       templateCount: state.templates.length,
       templateLimit: null,
@@ -116,8 +126,17 @@ export function getQuotaSnapshot(raw: BillingState): QuotaSnapshot {
     };
   }
 
-  const isPro = state.plan === "pro";
-  const isPremium = isUnlimitedPlan(state.plan);
+  const isPaidPro = isUnlimitedPlan(state.plan);
+  const isPro = isPaidPro || proTrialActive;
+  const isPremium = isPro;
+  const hasUsedProTrial = Boolean(state.hasUsedProTrial);
+  const canUseProTrial =
+    isAuthenticated &&
+    (state.plan === "free" || state.plan === "visitor") &&
+    !isPaidPro &&
+    !hasUsedProTrial &&
+    !proTrialActive;
+
   const freeLimit = isPremium
     ? Number.POSITIVE_INFINITY
     : freeLimitFor(state.plan);
@@ -136,31 +155,31 @@ export function getQuotaSnapshot(raw: BillingState): QuotaSnapshot {
     (state.plan === "free" && templateCount < FREE_TEMPLATE_LIMIT);
 
   let indicatorLabel: string;
-  if (isPro) {
+  if (isPaidPro) {
     indicatorLabel = "Sold Pro：一括生成・SEO予測つき無制限";
-  } else if (state.plan === "premium") {
-    indicatorLabel = "Sold プレミアム：生成無制限";
+  } else if (proTrialActive) {
+    indicatorLabel = "Proお試し中：今回限り解放";
   } else if (state.plan === "visitor") {
     indicatorLabel =
       freeRemaining > 0
         ? `お試し生成：あと${freeRemaining}回`
-        : ticketBalance > 0
-          ? `無料枠終了 / チケット残高：${ticketBalance}回`
-          : "お試し枠を使い切りました";
+        : "お試し枠を使い切りました";
   } else {
     if (freeRemaining > 0) {
       indicatorLabel = `今月の無料枠：あと${freeRemaining}回`;
-    } else if (ticketBalance > 0) {
-      indicatorLabel = `無料枠終了 / チケット残高：${ticketBalance}回`;
     } else {
       indicatorLabel = "今月の無料枠を使い切りました";
     }
   }
 
   return {
-    plan: state.plan,
+    plan: isPaidPro && state.plan === "premium" ? "pro" : state.plan,
     isPremium,
     isPro,
+    isPaidPro,
+    canUseProTrial,
+    hasUsedProTrial,
+    proTrialActive,
     freeRemaining,
     freeLimit,
     ticketBalance,
@@ -201,8 +220,9 @@ export function saveTemplate(
 }
 
 /** Demo / checkout helpers (client-side simulation) */
+/** @deprecated プレミアム廃止 — Pro に統合 */
 export function upgradeToPremium(state: BillingState): BillingState {
-  return { ...syncBillingMonth(state), plan: "premium" };
+  return upgradeToPro(state);
 }
 
 export function upgradeToPro(state: BillingState): BillingState {
@@ -215,6 +235,8 @@ export function registerAsFree(state: BillingState): BillingState {
     ...synced,
     plan: "free",
     freeUsedThisMonth: synced.freeUsedThisMonth,
+    // 新規無料登録はお試し未使用として開始（サーバー同期で上書き可）
+    hasUsedProTrial: synced.hasUsedProTrial,
   };
 }
 

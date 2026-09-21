@@ -6,17 +6,14 @@ import { PRICING } from "@/lib/billing";
 
 type Mode = "join" | "manage";
 
-type Props = {
+  type Props = {
   mode: Mode;
   className?: string;
-  /** Called after successful local upgrade simulation when Stripe is unavailable (optional) */
-  onDemoUpgrade?: () => void;
 };
 
 export function SubscriptionManageButton({
   mode,
   className = "",
-  onDemoUpgrade,
 }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,7 +85,7 @@ export function SubscriptionManageButton({
           ) : (
             <>
               <Crown className="h-4 w-4" />
-              SoldProプランに加入する（月額{" "}
+              Proへアップグレード（月額{" "}
               {PRICING.proMonthlyYen.toLocaleString("ja-JP")}円）
             </>
           )}
@@ -96,15 +93,6 @@ export function SubscriptionManageButton({
         <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
           ※未加入のため契約管理ポータルは利用できません。Checkoutへ進みます。
         </p>
-        {onDemoUpgrade && (
-          <button
-            type="button"
-            onClick={onDemoUpgrade}
-            className="mt-2 w-full text-center text-[11px] text-slate-500 underline-offset-2 hover:underline"
-          >
-            （デモ）StripeなしでPro状態にする
-          </button>
-        )}
         {error && (
           <p className="mt-2 rounded-lg border border-red-500/30 bg-red-950/40 px-3 py-2 text-xs text-red-200">
             {error}

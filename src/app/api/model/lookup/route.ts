@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
+import { logAnalysisEvent } from "@/lib/analytics";
 import { estimateModelVariants, extractCodeHint } from "@/lib/model-estimate";
 import { lookupModelVariants } from "@/lib/model-lookup";
+import { getOrCreateUserId } from "@/lib/user-session";
 import * as Sentry from "@sentry/nextjs";
+
+export const maxDuration = 60;
 
 /**
  * Always returns 200 + ≥1 candidates for non-empty queries.
@@ -39,6 +43,20 @@ export async function POST(request: Request) {
         ? result.candidates
         : estimateModelVariants(extractCodeHint(query), query).candidates;
 
+    try {
+      const { userId } = await getOrCreateUserId();
+      void logAnalysisEvent({
+        user_id: userId,
+        metadata: {
+          source: "model_lookup",
+          query_length: query.length,
+          candidate_count: candidates.length,
+        },
+      });
+    } catch (analyticsError) {
+      console.error("Analytics event log error:", analyticsError);
+    }
+
     return NextResponse.json({
       ...result,
       candidates,
@@ -48,6 +66,19 @@ export async function POST(request: Request) {
     Sentry.captureException(error);
     // Absolute fallback — still 200 with estimated models
     const fallback = estimateModelVariants(extractCodeHint(query), query);
+    try {
+      const { userId } = await getOrCreateUserId();
+      void logAnalysisEvent({
+        user_id: userId,
+        metadata: {
+          source: "model_lookup_fallback",
+          query_length: query.length,
+          candidate_count: fallback.candidates?.length ?? 0,
+        },
+      });
+    } catch (analyticsError) {
+      console.error("Analytics event log error:", analyticsError);
+    }
     return NextResponse.json(fallback);
   }
 }

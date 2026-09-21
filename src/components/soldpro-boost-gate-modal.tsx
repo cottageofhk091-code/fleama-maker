@@ -11,7 +11,7 @@ type Props = {
 };
 
 export function SoldProBoostGateModal({ open, onClose }: Props) {
-  const { upgradePro, openPaywall } = useBilling();
+  const { openPaywall } = useBilling();
 
   useEffect(() => {
     if (!open) return;
@@ -97,17 +97,15 @@ export function SoldProBoostGateModal({ open, onClose }: Props) {
               type="button"
               onClick={() => {
                 onClose();
-                upgradePro();
+                openPaywall();
               }}
-              className="soldpro-cta-glow inline-flex w-full max-w-md items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 px-5 py-4 text-center text-sm font-bold text-slate-950 shadow-lg shadow-amber-500/20 transition duration-300 hover:scale-[1.02] hover:shadow-xl hover:shadow-amber-500/40 sm:text-base"
+              className="soldpro-cta-glow inline-flex w-full max-w-md items-center justify-center gap-2 rounded-xl bg-[#D4AF37] px-5 py-4 text-center text-sm font-bold text-[#001F3F] shadow-lg transition hover:bg-[#e0c15a] sm:text-base"
             >
               <Crown className="h-5 w-5 shrink-0" />
-              <span className="leading-snug">
-                今すぐSoldProにアップグレードして解放
-              </span>
+              <span className="leading-snug">Proへアップグレード</span>
             </button>
             <p className="mt-2 text-center text-xs text-slate-400">
-              月額 {PRICING.proMonthlyYen.toLocaleString("ja-JP")}円（デモでは即時切替）
+              月額 {PRICING.proMonthlyYen.toLocaleString("ja-JP")}円
             </p>
           </div>
         </div>
@@ -115,13 +113,10 @@ export function SoldProBoostGateModal({ open, onClose }: Props) {
         <div className="shrink-0 border-t border-white/10 px-5 py-4 sm:px-7">
           <button
             type="button"
-            onClick={() => {
-              onClose();
-              openPaywall();
-            }}
+            onClick={onClose}
             className="w-full rounded-xl border border-white/15 bg-transparent px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:border-amber-500/30 hover:bg-white/5 hover:text-white"
           >
-            プラン一覧を見る
+            閉じる
           </button>
         </div>
       </div>
