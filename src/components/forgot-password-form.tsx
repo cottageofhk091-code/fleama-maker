@@ -4,12 +4,11 @@ import type { FormEvent } from "react";
 import { useState } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
-import { useAuth } from "@/components/auth-provider";
 import { BrandMark } from "@/components/brand-mark";
+import { requestPasswordResetViaApi } from "@/lib/auth-api-client";
 import { SITE_NAME } from "@/lib/site";
 
 export function ForgotPasswordForm() {
-  const { resetPassword } = useAuth();
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +18,8 @@ export function ForgotPasswordForm() {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const result = await resetPassword(email.trim());
+    // supabase.auth.resetPasswordForEmail は使わない（Resend API 経由）
+    const result = await requestPasswordResetViaApi(email.trim());
     setBusy(false);
     if (!result.ok) {
       setError(result.error);

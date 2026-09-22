@@ -26,15 +26,20 @@ type AuthContextValue = {
   session: Session | null;
   /** true when local debug forces signed-out UI */
   devUnauthenticated: boolean;
-  signUp: (email: string, password: string) => Promise<AuthResult>;
+  /** ログインのみ（メール送信なし） */
   signIn: (email: string, password: string) => Promise<AuthResult>;
   signOut: () => Promise<void>;
-  resetPassword: (email: string) => Promise<AuthResult>;
+  /** パスワード更新（リセット画面用・メール送信なし） */
   updatePassword: (password: string) => Promise<AuthResult>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+/**
+ * 注意: 会員登録・パスワード再設定メールは supabase.auth.signUp /
+ * resetPasswordForEmail では送らない。
+ * UI は /api/auth/signup・/api/auth/forgot-password（Resend）を直接呼ぶこと。
+ */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
@@ -70,31 +75,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return subscribeDevPersona(setDevPersona);
   }, []);
 
-  const signUp = useCallback(async (email: string, password: string) => {
-    try {
-      const res = await fetch("/api/auth/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      const data = (await res.json().catch(() => ({}))) as {
-        error?: string;
-      };
-      if (!res.ok) {
-        return {
-          ok: false as const,
-          error: data.error || "登録に失敗しました。",
-        };
-      }
-      return { ok: true as const };
-    } catch {
-      return {
-        ok: false as const,
-        error: "通信エラーが発生しました。しばらくしてから再度お試しください。",
-      };
-    }
-  }, []);
-
   const signIn = useCallback(async (email: string, password: string) => {
     const supabase = getSupabase();
     if (!supabase) {
@@ -114,31 +94,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const supabase = getSupabase();
     if (!supabase) return;
     await supabase.auth.signOut();
-  }, []);
-
-  const resetPassword = useCallback(async (email: string) => {
-    try {
-      const res = await fetch("/api/auth/forgot-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-      const data = (await res.json().catch(() => ({}))) as {
-        error?: string;
-      };
-      if (!res.ok) {
-        return {
-          ok: false as const,
-          error: data.error || "送信に失敗しました。",
-        };
-      }
-      return { ok: true as const };
-    } catch {
-      return {
-        ok: false as const,
-        error: "通信エラーが発生しました。しばらくしてから再度お試しください。",
-      };
-    }
   }, []);
 
   const updatePassword = useCallback(async (password: string) => {
@@ -161,22 +116,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user: devUnauthenticated ? null : (session?.user ?? null),
       session: devUnauthenticated ? null : session,
       devUnauthenticated,
-      signUp,
       signIn,
       signOut,
-      resetPassword,
       updatePassword,
     }),
-    [
-      ready,
-      session,
-      devUnauthenticated,
-      signUp,
-      signIn,
-      signOut,
-      resetPassword,
-      updatePassword,
-    ],
+    [ready, session, devUnauthenticated, signIn, signOut, updatePassword],
   );
 
   return (

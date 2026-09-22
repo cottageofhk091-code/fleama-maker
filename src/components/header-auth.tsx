@@ -7,6 +7,7 @@ import { useAuth } from "@/components/auth-provider";
 import { useBilling } from "@/components/billing/billing-provider";
 import { BrandMark } from "@/components/brand-mark";
 import { CenterModal } from "@/components/center-modal";
+import { registerViaApi } from "@/lib/auth-api-client";
 import { SITE_NAME } from "@/lib/site";
 
 type Mode = "login" | "signup";
@@ -21,7 +22,7 @@ const primarySubmit =
   "inline-flex w-full items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-teal-500 disabled:cursor-not-allowed disabled:opacity-60";
 
 export function HeaderAuth() {
-  const { ready, user, signIn, signUp, signOut } = useAuth();
+  const { ready, user, signIn, signOut } = useAuth();
   const { becomeFreeUser } = useBilling();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("login");
@@ -59,25 +60,31 @@ export function HeaderAuth() {
     setBusy(true);
     setError(null);
     setInfo(null);
-    const result =
-      mode === "login"
-        ? await signIn(email.trim(), password)
-        : await signUp(email.trim(), password);
+
+    if (mode === "login") {
+      const result = await signIn(email.trim(), password);
+      setBusy(false);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setOpen(false);
+      setEmail("");
+      setPassword("");
+      return;
+    }
+
+    // 無料登録: supabase.auth.signUp は使わず自前 API（Resend）のみ
+    const result = await registerViaApi(email.trim(), password);
     setBusy(false);
     if (!result.ok) {
       setError(result.error);
       return;
     }
-    if (mode === "signup") {
-      becomeFreeUser();
-      setInfo(
-        "確認メールを送信しました。メール内のリンクをクリックすると自動でログインし、トップページへ移動します。Pro機能は1回無料でお試しできます。",
-      );
-    } else {
-      setOpen(false);
-      setEmail("");
-      setPassword("");
-    }
+    becomeFreeUser();
+    setInfo(
+      "確認メールを送信しました。メール内の「登録を完了する」リンクをクリックすると自動でログインし、トップページへ移動します。Pro機能は1回無料でお試しできます。",
+    );
   }
 
   function openModal(next: Mode) {
@@ -146,7 +153,7 @@ export function HeaderAuth() {
             {mode === "login" ? "ログイン" : "無料登録"}できます
           </p>
 
-          <form onSubmit={handleSubmit} className="mt-4 space-y-3">
+          <form onSubmit={(e) => void handleSubmit(e)} className="mt-4 space-y-3">
             <div>
               <label
                 htmlFor="auth-email"
