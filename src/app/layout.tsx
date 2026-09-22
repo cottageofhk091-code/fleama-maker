@@ -8,6 +8,7 @@ import { PricingPlansModalHost } from "@/components/pricing-plans-modal";
 import { DevPlanSwitcher } from "@/components/billing/dev-plan-switcher";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
+import { VisitTracker } from "@/components/visit-tracker";
 import {
   SITE_DESCRIPTION,
   SITE_NAME,
@@ -83,6 +84,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <ThemeProvider>
           <AuthProvider>
             <BillingProvider>
+              <VisitTracker />
               <Header />
               <main className="flex-1">{children}</main>
               <Footer />

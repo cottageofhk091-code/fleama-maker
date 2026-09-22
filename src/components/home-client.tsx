@@ -8,7 +8,6 @@ import { LoadingOverlay } from "@/components/loading-overlay";
 import { PaywallModal } from "@/components/billing/paywall-modal";
 import { ProRestrictedOverlay } from "@/components/billing/pro-restricted-overlay";
 import { useBilling } from "@/components/billing/billing-provider";
-import { AnalyticsVisitLogger } from "@/components/analytics-visit-logger";
 import { ProBulkDashboard } from "@/components/pro/pro-bulk-dashboard";
 import { SaleSpeedBadge, SeoScoreGauge } from "@/components/pro/seo-widgets";
 import { computeSeoInsights } from "@/lib/seo-insights";
@@ -45,7 +44,6 @@ export function HomeClient() {
 
   return (
     <>
-      <AnalyticsVisitLogger />
       {loading && <LoadingOverlay />}
       <PaywallModal />
 
