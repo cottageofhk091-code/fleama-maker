@@ -71,7 +71,7 @@ export function HeaderAuth() {
     if (mode === "signup") {
       becomeFreeUser();
       setInfo(
-        "登録しました。確認メールが届く場合はリンクを開いてからログインしてください。Pro機能は1回無料でお試しできます。",
+        "確認メールを送信しました。メール内のリンクをクリックすると自動でログインし、トップページへ移動します。Pro機能は1回無料でお試しできます。",
       );
     } else {
       setOpen(false);
@@ -184,6 +184,18 @@ export function HeaderAuth() {
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
               />
             </div>
+
+            {mode === "login" && (
+              <div className="text-right">
+                <a
+                  href="/forgot-password"
+                  className="text-xs font-medium text-teal-700 underline-offset-2 hover:underline dark:text-teal-300"
+                  onClick={() => setOpen(false)}
+                >
+                  パスワードを忘れた方はこちら
+                </a>
+              </div>
+            )}
 
             {error && (
               <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
