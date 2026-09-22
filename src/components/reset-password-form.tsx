@@ -5,16 +5,19 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
-import { useAuth } from "@/components/auth-provider";
 import { BrandMark } from "@/components/brand-mark";
 import { establishSessionFromUrl } from "@/lib/auth-session-from-url";
+import { getSupabase } from "@/lib/supabase";
 import { SITE_NAME } from "@/lib/site";
 
+/**
+ * 再設定メール着地後、URL の code / token_hash / #access_token から
+ * リカバリーセッションが立つまで待ってからパスワード更新 UI を出す。
+ */
 export function ResetPasswordForm() {
-  const { updatePassword } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [ready, setReady] = useState(false);
+  const [isReady, setIsReady] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
@@ -23,24 +26,103 @@ export function ResetPasswordForm() {
   const [done, setDone] = useState(false);
 
   useEffect(() => {
+    const supabase = getSupabase();
+    if (!supabase) {
+      setLinkError("Supabase が未設定です。");
+      setIsReady(true);
+      return;
+    }
+
+    let settled = false;
     let cancelled = false;
+    let waitTimer: number | undefined;
+
+    const markReady = () => {
+      if (settled || cancelled) return;
+      settled = true;
+      setIsReady(true);
+    };
+    const markError = (message: string) => {
+      if (settled || cancelled) return;
+      settled = true;
+      setLinkError(message);
+      setIsReady(true);
+    };
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (event === "PASSWORD_RECOVERY" || session) {
+          markReady();
+        }
+      },
+    );
+
+    // ?code= / ?token_hash= およびハッシュ処理済みセッション
     void (async () => {
       const result = await establishSessionFromUrl(searchParams);
-      if (cancelled) return;
+      if (settled || cancelled) return;
       if (!result.ok) {
-        setLinkError(result.error);
-        setReady(true);
+        markError(result.error);
         return;
       }
-      if (result.type === "none") {
-        setLinkError(
-          "再設定リンクが無効か期限切れです。もう一度メール送信からお試しください。",
-        );
+      if (result.type === "session") {
+        markReady();
+        return;
       }
-      setReady(true);
+
+      // Admin generateLink は #access_token&type=recovery で戻ることが多い
+      const hash = window.location.hash.replace(/^#/, "");
+      if (hash) {
+        const params = new URLSearchParams(hash);
+        const access_token = params.get("access_token");
+        const refresh_token = params.get("refresh_token");
+        if (access_token && refresh_token) {
+          const { error: setErr } = await supabase.auth.setSession({
+            access_token,
+            refresh_token,
+          });
+          if (settled || cancelled) return;
+          if (setErr) {
+            markError(setErr.message);
+            return;
+          }
+          window.history.replaceState(
+            null,
+            "",
+            `${window.location.pathname}${window.location.search}`,
+          );
+          markReady();
+          return;
+        }
+      }
+
+      const { data } = await supabase.auth.getSession();
+      if (settled || cancelled) return;
+      if (data.session) {
+        markReady();
+        return;
+      }
+
+      // detectSessionInUrl の非同期処理待ち（onAuthStateChange で先に解決する場合あり）
+      waitTimer = window.setTimeout(() => {
+        if (settled || cancelled) return;
+        void supabase.auth.getSession().then(({ data: late }) => {
+          if (settled || cancelled) return;
+          if (late.session) {
+            markReady();
+            return;
+          }
+          markError(
+            "再設定リンクが無効か期限切れです。もう一度メール送信からお試しください。",
+          );
+        });
+      }, 2500);
     })();
+
     return () => {
       cancelled = true;
+      if (waitTimer !== undefined) window.clearTimeout(waitTimer);
+      authListener.subscription.unsubscribe();
     };
   }, [searchParams]);
 
@@ -55,18 +137,27 @@ export function ResetPasswordForm() {
       setError("パスワードが一致しません。");
       return;
     }
+
+    const supabase = getSupabase();
+    if (!supabase) {
+      setError("Supabase が未設定です。");
+      return;
+    }
+
     setBusy(true);
-    const result = await updatePassword(password);
+    const { error: updateError } = await supabase.auth.updateUser({
+      password,
+    });
     setBusy(false);
-    if (!result.ok) {
-      setError(result.error);
+    if (updateError) {
+      setError(updateError.message);
       return;
     }
     setDone(true);
     window.setTimeout(() => router.replace("/"), 1500);
   }
 
-  if (!ready) {
+  if (!isReady) {
     return (
       <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 px-4 py-16">
         <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
@@ -105,7 +196,7 @@ export function ResetPasswordForm() {
         </div>
       ) : done ? (
         <p className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-4 text-sm text-teal-900 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-100">
-          パスワードを更新しました。トップへ移動します…
+          パスワードの変更が完了しました。トップへ移動します…
         </p>
       ) : (
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
