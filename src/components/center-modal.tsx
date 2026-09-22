@@ -45,14 +45,13 @@ export function CenterModal({
     e.preventDefault();
     e.stopPropagation();
     if (e.target !== e.currentTarget || closeDisabled) return;
-    // 開いた直後の同一クリックで backdrop が受けて即閉じるのを防ぐ
     if (Date.now() - openedAtRef.current < 320) return;
     onClose();
   }
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-black/50 p-4 sm:p-6"
       style={{ position: "fixed", inset: 0, zIndex: 100 }}
       role="presentation"
       onMouseDown={maybeCloseFromBackdrop}
@@ -62,19 +61,20 @@ export function CenterModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
-        className="mx-auto w-[90%] max-w-[480px] max-h-[85vh] overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+        className="my-auto flex w-[90%] max-w-[480px] max-h-[min(85vh,720px)] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
         style={{
           width: "90%",
           maxWidth: 480,
-          maxHeight: "85vh",
-          overflowY: "auto",
+          maxHeight: "min(85vh, 720px)",
           margin: "auto",
           borderRadius: 12,
         }}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
-        {children}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          {children}
+        </div>
       </div>
     </div>
   );

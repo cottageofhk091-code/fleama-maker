@@ -12,12 +12,6 @@ import {
 import type { Session, User } from "@supabase/supabase-js";
 import { getSupabase } from "@/lib/supabase";
 import {
-  getAuthCallbackUrl,
-  getPasswordResetRedirectUrl,
-} from "@/lib/auth-redirect";
-import { persistAnalyticsProfile } from "@/lib/analytics-profile-client";
-import { PROFILE_PLAN } from "@/lib/billing";
-import {
   getDevPersona,
   isDevPersonaEnabled,
   subscribeDevPersona,
@@ -77,30 +71,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
-    const supabase = getSupabase();
-    if (!supabase) {
-      return { ok: false as const, error: "Supabase が未設定です。" };
-    }
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        // 確認はメール内リンク → /auth/callback でセッション確立 → トップへ
-        emailRedirectTo: getAuthCallbackUrl("/"),
-      },
-    });
-    if (error) {
-      return { ok: false as const, error: error.message };
-    }
-    const userId = data.user?.id;
-    if (userId) {
-      persistAnalyticsProfile({
-        user_id: userId,
-        plan_type: PROFILE_PLAN.free,
-        has_used_pro_trial: false,
+    try {
+      const res = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
       });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      if (!res.ok) {
+        return {
+          ok: false as const,
+          error: data.error || "登録に失敗しました。",
+        };
+      }
+      return { ok: true as const };
+    } catch {
+      return {
+        ok: false as const,
+        error: "通信エラーが発生しました。しばらくしてから再度お試しください。",
+      };
     }
-    return { ok: true as const };
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
@@ -125,17 +117,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const resetPassword = useCallback(async (email: string) => {
-    const supabase = getSupabase();
-    if (!supabase) {
-      return { ok: false as const, error: "Supabase が未設定です。" };
+    try {
+      const res = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      if (!res.ok) {
+        return {
+          ok: false as const,
+          error: data.error || "送信に失敗しました。",
+        };
+      }
+      return { ok: true as const };
+    } catch {
+      return {
+        ok: false as const,
+        error: "通信エラーが発生しました。しばらくしてから再度お試しください。",
+      };
     }
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: getPasswordResetRedirectUrl(),
-    });
-    if (error) {
-      return { ok: false as const, error: error.message };
-    }
-    return { ok: true as const };
   }, []);
 
   const updatePassword = useCallback(async (password: string) => {

@@ -1,10 +1,9 @@
 /**
  * Resend 経由のアプリ固有メール送信
- * From は常に フリマリストSold <noreply@cloudflowriver.com>
+ * From は常に固定（共有 Supabase SMTP は使わない）
  */
-
-export const RESEND_FROM = "フリマリストSold <noreply@cloudflowriver.com>";
-export const RESEND_APP_NAME = "フリマリストSold";
+export const RESEND_FROM = "フリマリストSold <noreply@cloudflowriver.com>" as const;
+export const RESEND_APP_NAME = "フリマリストSold" as const;
 
 export type SendResendEmailParams = {
   to: string | string[];
