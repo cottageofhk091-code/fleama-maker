@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
+import { translateAuthError } from "@/lib/auth-errors";
 import { getSupabase } from "@/lib/supabase";
 import {
   getDevPersona,
@@ -85,7 +86,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       password,
     });
     if (error) {
-      return { ok: false as const, error: error.message };
+      return {
+        ok: false as const,
+        error: translateAuthError(error.message),
+      };
     }
     return { ok: true as const };
   }, []);
@@ -103,7 +107,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const { error } = await supabase.auth.updateUser({ password });
     if (error) {
-      return { ok: false as const, error: error.message };
+      return {
+        ok: false as const,
+        error: translateAuthError(error.message),
+      };
     }
     return { ok: true as const };
   }, []);

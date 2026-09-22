@@ -1,5 +1,6 @@
 "use client";
 
+import { translateAuthError } from "@/lib/auth-errors";
 import { getSupabase } from "@/lib/supabase";
 
 type AuthUrlResult =
@@ -22,7 +23,7 @@ export async function establishSessionFromUrl(
   if (code) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (error) {
-      return { ok: false, error: error.message };
+      return { ok: false, error: translateAuthError(error.message) };
     }
     return { ok: true, type: "session" };
   }
@@ -41,7 +42,7 @@ export async function establishSessionFromUrl(
         | "email",
     });
     if (error) {
-      return { ok: false, error: error.message };
+      return { ok: false, error: translateAuthError(error.message) };
     }
     return { ok: true, type: "session" };
   }

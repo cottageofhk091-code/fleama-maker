@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { Send, X } from "lucide-react";
+import { translateAuthError } from "@/lib/auth-errors";
 
 const CANCEL_REASONS = [
   "料金が高い",
@@ -78,7 +79,11 @@ export function CancelSubscriptionModal({ open, onClose }: Props) {
       setReason(CANCEL_REASONS[0]);
     } catch (err) {
       setStatus("error");
-      setError(err instanceof Error ? err.message : "送信に失敗しました");
+      setError(
+        translateAuthError(
+          err instanceof Error ? err.message : "送信に失敗しました",
+        ),
+      );
     }
   }
 

@@ -1,3 +1,5 @@
+import { translateAuthError } from "@/lib/auth-errors";
+
 export type CheckoutPlanType = "pro";
 
 export async function startCheckoutSession(
@@ -13,14 +15,18 @@ export async function startCheckoutSession(
     if (!res.ok || !data.url) {
       return {
         ok: false,
-        error: data.error || "決済ページを開けませんでした",
+        error: translateAuthError(
+          data.error || "決済ページを開けませんでした",
+        ),
       };
     }
     return { ok: true, url: data.url };
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "通信エラーが発生しました",
+      error: translateAuthError(
+        err instanceof Error ? err.message : "通信エラーが発生しました",
+      ),
     };
   }
 }

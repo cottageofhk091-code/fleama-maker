@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { Send } from "lucide-react";
+import { translateAuthError } from "@/lib/auth-errors";
 
 const fieldClass =
   "w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500";
@@ -64,7 +65,11 @@ export function ContactForm({
       setMessage("");
     } catch (err) {
       setStatus("error");
-      setError(err instanceof Error ? err.message : "送信に失敗しました");
+      setError(
+        translateAuthError(
+          err instanceof Error ? err.message : "送信に失敗しました",
+        ),
+      );
     }
   }
 

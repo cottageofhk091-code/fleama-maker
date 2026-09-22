@@ -3,6 +3,8 @@
  * supabase.auth.signUp / resetPasswordForEmail は絶対に使わない。
  */
 
+import { translateAuthError } from "@/lib/auth-errors";
+
 export type AuthApiResult = { ok: true } | { ok: false; error: string };
 
 export async function registerViaApi(
@@ -17,13 +19,18 @@ export async function registerViaApi(
     });
     const data = (await res.json().catch(() => ({}))) as { error?: string };
     if (!res.ok) {
-      return { ok: false, error: data.error || "登録に失敗しました。" };
+      return {
+        ok: false,
+        error: translateAuthError(data.error || "登録に失敗しました。"),
+      };
     }
     return { ok: true };
-  } catch {
+  } catch (err) {
     return {
       ok: false,
-      error: "通信エラーが発生しました。しばらくしてから再度お試しください。",
+      error: translateAuthError(
+        err instanceof Error ? err.message : "通信エラーが発生しました。",
+      ),
     };
   }
 }
@@ -39,13 +46,18 @@ export async function requestPasswordResetViaApi(
     });
     const data = (await res.json().catch(() => ({}))) as { error?: string };
     if (!res.ok) {
-      return { ok: false, error: data.error || "送信に失敗しました。" };
+      return {
+        ok: false,
+        error: translateAuthError(data.error || "送信に失敗しました。"),
+      };
     }
     return { ok: true };
-  } catch {
+  } catch (err) {
     return {
       ok: false,
-      error: "通信エラーが発生しました。しばらくしてから再度お試しください。",
+      error: translateAuthError(
+        err instanceof Error ? err.message : "通信エラーが発生しました。",
+      ),
     };
   }
 }

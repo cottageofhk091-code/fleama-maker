@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { establishSessionFromUrl } from "@/lib/auth-session-from-url";
+import { translateAuthError } from "@/lib/auth-errors";
 import { getSupabase } from "@/lib/supabase";
 import { SITE_NAME } from "@/lib/site";
 
@@ -62,7 +63,7 @@ export function ResetPasswordForm() {
       const result = await establishSessionFromUrl(searchParams);
       if (settled || cancelled) return;
       if (!result.ok) {
-        markError(result.error);
+        markError(translateAuthError(result.error));
         return;
       }
       if (result.type === "session") {
@@ -83,7 +84,7 @@ export function ResetPasswordForm() {
           });
           if (settled || cancelled) return;
           if (setErr) {
-            markError(setErr.message);
+            markError(translateAuthError(setErr.message));
             return;
           }
           window.history.replaceState(
@@ -150,7 +151,7 @@ export function ResetPasswordForm() {
     });
     setBusy(false);
     if (updateError) {
-      setError(updateError.message);
+      setError(translateAuthError(updateError.message));
       return;
     }
     setDone(true);

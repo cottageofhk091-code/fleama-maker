@@ -8,6 +8,7 @@ import { useBilling } from "@/components/billing/billing-provider";
 import { BrandMark } from "@/components/brand-mark";
 import { CenterModal } from "@/components/center-modal";
 import { registerViaApi } from "@/lib/auth-api-client";
+import { translateAuthError } from "@/lib/auth-errors";
 import { SITE_NAME } from "@/lib/site";
 
 type Mode = "login" | "signup";
@@ -58,7 +59,7 @@ export function HeaderAuthModal({
       const result = await signIn(email.trim(), password);
       setBusy(false);
       if (!result.ok) {
-        setError(result.error);
+        setError(translateAuthError(result.error));
         return;
       }
       onClose();
@@ -71,7 +72,7 @@ export function HeaderAuthModal({
     const result = await registerViaApi(email.trim(), password);
     setBusy(false);
     if (!result.ok) {
-      setError(result.error);
+      setError(translateAuthError(result.error));
       return;
     }
     becomeFreeUser();

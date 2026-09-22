@@ -7,6 +7,7 @@ import {
   establishSessionFromUrl,
   safeNextPath,
 } from "@/lib/auth-session-from-url";
+import { translateAuthError } from "@/lib/auth-errors";
 
 /**
  * メール確認リンクの着地先。セッション確立後に next（既定: /）へ転送。
@@ -22,7 +23,7 @@ export function AuthCallbackClient() {
       const result = await establishSessionFromUrl(searchParams);
       if (cancelled) return;
       if (!result.ok) {
-        setError(result.error);
+        setError(translateAuthError(result.error));
         return;
       }
       const next = safeNextPath(searchParams.get("next"));
