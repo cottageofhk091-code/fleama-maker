@@ -10,10 +10,15 @@ type Props = {
   children: ReactNode;
   /** Prevent backdrop close while busy */
   closeDisabled?: boolean;
+  /**
+   * true（既定）: ダイアログに p-6 を付与
+   * false: 子コンポーネント側で余白を管理（料金プラン等）
+   */
+  padded?: boolean;
 };
 
 /**
- * 中央配置モーダル共通シェル（見切れ防止）
+ * 全モーダル共通シェル — 画面中央固定・見切れ防止
  */
 export function CenterModal({
   open,
@@ -21,6 +26,7 @@ export function CenterModal({
   labelledBy,
   children,
   closeDisabled = false,
+  padded = true,
 }: Props) {
   const openedAtRef = useRef(0);
 
@@ -51,8 +57,7 @@ export function CenterModal({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-black/50 p-4 sm:p-6"
-      style={{ position: "fixed", inset: 0, zIndex: 100 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       role="presentation"
       onMouseDown={maybeCloseFromBackdrop}
       onClick={maybeCloseFromBackdrop}
@@ -61,20 +66,13 @@ export function CenterModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
-        className="my-auto flex w-[90%] max-w-[480px] max-h-[min(85vh,720px)] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
-        style={{
-          width: "90%",
-          maxWidth: 480,
-          maxHeight: "min(85vh, 720px)",
-          margin: "auto",
-          borderRadius: 12,
-        }}
+        className={`relative my-auto w-full max-w-md max-h-[85vh] overflow-y-auto rounded-xl bg-white shadow-2xl dark:bg-slate-900 dark:border dark:border-slate-700 ${
+          padded ? "p-6" : ""
+        }`}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          {children}
-        </div>
+        {children}
       </div>
     </div>
   );

@@ -34,7 +34,7 @@ export function SoldProBoostGateModal({ open, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden p-4 sm:p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="soldpro-gate-title"
@@ -42,17 +42,17 @@ export function SoldProBoostGateModal({ open, onClose }: Props) {
       <button
         type="button"
         aria-label="背景をタップして閉じる"
-        className="absolute inset-0 bg-slate-950/80 backdrop-blur-md"
+        className="absolute inset-0"
         onClick={onClose}
       />
 
-      <div className="relative z-10 flex w-full max-w-lg max-h-[min(90vh,640px)] flex-col overflow-hidden rounded-2xl border border-amber-500/30 bg-gradient-to-b from-slate-900 to-slate-950 text-white shadow-2xl shadow-amber-500/10">
-        <div className="relative shrink-0 border-b border-amber-500/20 px-5 pb-4 pt-5 sm:px-7 sm:pt-6">
+      <div className="relative z-10 my-auto flex w-full max-w-md max-h-[85vh] flex-col overflow-y-auto rounded-xl border border-amber-500/30 bg-gradient-to-b from-slate-900 to-slate-950 p-6 text-white shadow-2xl shadow-amber-500/10">
+        <div className="relative shrink-0 border-b border-amber-500/20 pb-4">
           <button
             type="button"
             aria-label="閉じる"
             onClick={onClose}
-            className="absolute right-3 top-3 inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-slate-300 transition hover:border-amber-500/40 hover:bg-white/10 hover:text-white sm:right-4 sm:top-4"
+            className="absolute right-0 top-0 inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-slate-300 transition hover:border-amber-500/40 hover:bg-white/10 hover:text-white"
           >
             <X className="h-5 w-5" />
           </button>
@@ -76,7 +76,7 @@ export function SoldProBoostGateModal({ open, onClose }: Props) {
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-7">
+        <div className="min-h-0 flex-1 overflow-y-auto py-5">
           <ul className="space-y-2.5 text-sm text-slate-200">
             <li className="flex gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5">
               <span className="text-amber-400">▸</span>
@@ -110,7 +110,7 @@ export function SoldProBoostGateModal({ open, onClose }: Props) {
           </div>
         </div>
 
-        <div className="shrink-0 border-t border-white/10 px-5 py-4 sm:px-7">
+        <div className="shrink-0 border-t border-white/10 pt-4">
           <button
             type="button"
             onClick={onClose}

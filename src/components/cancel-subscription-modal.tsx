@@ -84,7 +84,7 @@ export function CancelSubscriptionModal({ open, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden p-4 sm:p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="cancel-modal-title"
@@ -92,11 +92,11 @@ export function CancelSubscriptionModal({ open, onClose }: Props) {
       <button
         type="button"
         aria-label="背景をタップして閉じる"
-        className="absolute inset-0 bg-slate-950/80 backdrop-blur-md"
+        className="absolute inset-0"
         onClick={onClose}
       />
-      <div className="relative z-10 flex max-h-[min(90vh,720px)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-        <div className="relative shrink-0 border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+      <div className="relative z-10 my-auto flex max-h-[85vh] w-full max-w-md flex-col overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+        <div className="relative shrink-0 border-b border-slate-100 pb-4 dark:border-slate-800">
           <button
             type="button"
             aria-label="閉じる"
@@ -116,7 +116,7 @@ export function CancelSubscriptionModal({ open, onClose }: Props) {
           </p>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto pt-4">
           {status === "success" ? (
             <div className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-900 dark:border-teal-800 dark:bg-teal-950/40 dark:text-teal-200">
               解約申請を受け付けました。内容を確認のうえ対応します。

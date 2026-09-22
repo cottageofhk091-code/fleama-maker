@@ -43,8 +43,9 @@ export function PricingPlansModal({ open, onClose }: ModalProps) {
       onClose={close}
       labelledBy="pricing-dialog-title"
       closeDisabled={loading}
+      padded={false}
     >
-      <div className="flex max-h-[85vh] flex-col">
+      <div className="flex flex-col">
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 dark:border-slate-800 sm:px-6">
           <div>
             <h2

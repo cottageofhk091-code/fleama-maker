@@ -121,7 +121,7 @@ export function HeaderAuth() {
         labelledBy="auth-dialog-title"
         closeDisabled={busy}
       >
-        <div className="p-5 sm:p-6">
+        <div>
           <div className="flex items-start justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
               <BrandMark size={40} className="shrink-0 rounded-xl shadow-sm" />
