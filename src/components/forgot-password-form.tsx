@@ -7,6 +7,7 @@ import { Loader2 } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { requestPasswordResetViaApi } from "@/lib/auth-api-client";
 import { translateAuthError } from "@/lib/auth-errors";
+import { markPendingRecovery } from "@/lib/auth-tab-sync";
 import { SITE_NAME } from "@/lib/site";
 
 export function ForgotPasswordForm() {
@@ -26,6 +27,7 @@ export function ForgotPasswordForm() {
       setError(translateAuthError(result.error));
       return;
     }
+    markPendingRecovery(email.trim());
     setSent(true);
   }
 

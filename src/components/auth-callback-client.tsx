@@ -5,12 +5,16 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import {
   establishSessionFromUrl,
-  safeNextPath,
 } from "@/lib/auth-session-from-url";
 import { translateAuthError } from "@/lib/auth-errors";
+import {
+  AUTH_CONFIRMED_PATH,
+  PASSWORD_RESET_NOTICE_PATH,
+} from "@/lib/auth-redirect";
+import { notifyPasswordRecovery, notifySignupConfirmed } from "@/lib/auth-tab-sync";
 
 /**
- * メール確認リンクの着地先。セッション確立後に next（既定: /）へ転送。
+ * 旧リンク互換: セッション確立後は案内ページへ転送（元タブ完結 UX）
  */
 export function AuthCallbackClient() {
   const router = useRouter();
@@ -26,8 +30,22 @@ export function AuthCallbackClient() {
         setError(translateAuthError(result.error));
         return;
       }
-      const next = safeNextPath(searchParams.get("next"));
-      router.replace(next);
+
+      const type = (searchParams.get("type") || "").toLowerCase();
+      const next = searchParams.get("next") || "";
+      const isRecovery =
+        type === "recovery" ||
+        next.includes("password-reset") ||
+        next.includes("reset-password");
+
+      if (isRecovery) {
+        notifyPasswordRecovery();
+        router.replace(PASSWORD_RESET_NOTICE_PATH);
+        return;
+      }
+
+      notifySignupConfirmed({ bonusGranted: true });
+      router.replace(AUTH_CONFIRMED_PATH);
     })();
     return () => {
       cancelled = true;
@@ -55,7 +73,7 @@ export function AuthCallbackClient() {
     <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 px-4 py-16">
       <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
       <p className="text-sm text-slate-600 dark:text-slate-300">
-        ログイン処理中です…
+        認証処理中です…
       </p>
     </div>
   );

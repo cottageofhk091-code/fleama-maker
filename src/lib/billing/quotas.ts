@@ -1,10 +1,10 @@
 /** Plan limits & pricing for フリマリスト Sold */
 
-/** Free plan monthly generation cap */
-export const FREE_MONTHLY_LIMIT = 8;
+/** Free plan monthly generation cap — 基本生成は無制限 */
+export const FREE_MONTHLY_LIMIT = Number.POSITIVE_INFINITY;
 
-/** Visitor (unregistered) trial generations */
-export const VISITOR_TRIAL_LIMIT = 1;
+/** Visitor (unregistered) trial generations — 基本生成は無制限 */
+export const VISITOR_TRIAL_LIMIT = Number.POSITIVE_INFINITY;
 
 /** Free plan max saved templates */
 export const FREE_TEMPLATE_LIMIT = 2;

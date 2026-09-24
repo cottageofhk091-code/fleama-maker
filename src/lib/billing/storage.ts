@@ -42,6 +42,12 @@ export function loadBillingState(): BillingState {
           ? parsed.stripeCustomerId.trim()
           : undefined,
       hasUsedProTrial: Boolean(parsed.hasUsedProTrial),
+      freeCredits:
+        typeof parsed.freeCredits === "number"
+          ? Math.max(0, Math.floor(parsed.freeCredits))
+          : parsed.hasUsedProTrial
+            ? 0
+            : 1,
     });
   } catch {
     return createDefaultBillingState("visitor");

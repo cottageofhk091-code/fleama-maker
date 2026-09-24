@@ -113,6 +113,7 @@ export async function POST(request: Request) {
       await saveUserProfile({
         user_id: userId,
         plan_type: PROFILE_PLAN.free,
+        free_credits: 1,
         has_used_pro_trial: false,
       });
     }

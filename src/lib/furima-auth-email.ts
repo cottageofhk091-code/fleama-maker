@@ -7,16 +7,16 @@ const MAIL: Record<
   { subject: string; heading: string; cta: string; body: string }
 > = {
   signup: {
-    subject: `【${RESEND_APP_NAME}】会員登録の完了お手続き`,
-    heading: "会員登録の完了お手続き",
+    subject: `【${RESEND_APP_NAME}】会員登録のご確認`,
+    heading: "会員登録のご確認",
     cta: "登録を完了する",
-    body: "下のボタンからメールアドレスを確認し、フリマリストSold の会員登録を完了してください。",
+    body: "下のボタンからメールアドレスを確認し、会員登録を完了してください。確認後は元の画面（タブ）に戻ってご利用ください。",
   },
   recovery: {
-    subject: `【${RESEND_APP_NAME}】パスワードの再設定`,
-    heading: "パスワードの再設定",
-    cta: "新しいパスワードを設定する",
-    body: "下のボタンからパスワード再設定ページを開き、新しいパスワードを設定してください。",
+    subject: `【${RESEND_APP_NAME}】パスワード再設定のご案内`,
+    heading: "パスワード再設定のご案内",
+    cta: "パスワードを再設定する",
+    body: "下のボタンから認証を完了したあと、元の画面（タブ）に戻り新しいパスワードを入力してください。",
   },
 };
 

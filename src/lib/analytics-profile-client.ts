@@ -2,7 +2,7 @@
 
 import { resolveAnalyticsUserId } from "@/lib/analytics-session";
 import {
-  fetchHasUsedProTrial,
+  fetchFreeCredits,
   logAnalysisEvent,
   saveUserProfile,
   type UserProfileInput,
@@ -22,6 +22,7 @@ export function persistAnalyticsProfile(
         age_group: partial.age_group,
         region: partial.region,
         has_used_pro_trial: partial.has_used_pro_trial,
+        free_credits: partial.free_credits,
       });
     } catch (error) {
       console.error("Analytics profile save error:", error);
@@ -29,12 +30,13 @@ export function persistAnalyticsProfile(
   })();
 }
 
-/** Pro お試し消費を profiles へ反映 + 分析イベント送信 */
+/** Pro お試し消費を profiles.free_credits=0 へ反映 */
 export async function consumeProTrialRemote(userId?: string): Promise<void> {
   try {
     const user_id = userId?.trim() || (await resolveAnalyticsUserId());
     await saveUserProfile({
       user_id,
+      free_credits: 0,
       has_used_pro_trial: true,
     });
     void logAnalysisEvent({
@@ -42,6 +44,7 @@ export async function consumeProTrialRemote(userId?: string): Promise<void> {
       metadata: {
         is_trial: true,
         source: "pro_trial",
+        free_credits: 0,
       },
     });
   } catch (error) {
@@ -49,16 +52,25 @@ export async function consumeProTrialRemote(userId?: string): Promise<void> {
   }
 }
 
-/** ログイン後にサーバー上の消費フラグを取得 */
-export async function loadHasUsedProTrialFromServer(
+/** ログイン後にサーバー上の free_credits を取得 */
+export async function loadFreeCreditsFromServer(
   userId?: string,
-): Promise<boolean | null> {
+): Promise<{ freeCredits: number; hasUsedProTrial: boolean } | null> {
   try {
     const user_id = userId?.trim() || (await resolveAnalyticsUserId());
     if (!user_id) return null;
-    return await fetchHasUsedProTrial(user_id);
+    return await fetchFreeCredits(user_id);
   } catch (error) {
-    console.error("Pro trial fetch error:", error);
+    console.error("Free credits fetch error:", error);
     return null;
   }
+}
+
+/** @deprecated loadFreeCreditsFromServer を利用 */
+export async function loadHasUsedProTrialFromServer(
+  userId?: string,
+): Promise<boolean | null> {
+  const snap = await loadFreeCreditsFromServer(userId);
+  if (!snap) return null;
+  return snap.hasUsedProTrial;
 }

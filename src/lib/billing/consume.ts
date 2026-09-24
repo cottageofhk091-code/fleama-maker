@@ -1,7 +1,5 @@
 import {
-  FREE_MONTHLY_LIMIT,
   FREE_TEMPLATE_LIMIT,
-  VISITOR_TRIAL_LIMIT,
   currentMonthKey,
   isUnlimitedPlan,
 } from "./quotas";
@@ -24,6 +22,7 @@ export function createDefaultBillingState(
     freeUsedThisMonth: 0,
     templates: [],
     hasUsedProTrial: false,
+    freeCredits: 1,
   };
 }
 
@@ -38,64 +37,18 @@ export function syncBillingMonth(state: BillingState): BillingState {
   };
 }
 
-function freeLimitFor(plan: BillingState["plan"]): number {
-  if (plan === "visitor") return VISITOR_TRIAL_LIMIT;
-  if (plan === "free") return FREE_MONTHLY_LIMIT;
-  return Number.POSITIVE_INFINITY;
-}
-
-function freeUsedFor(state: BillingState): number {
-  if (state.plan === "visitor") return state.visitorUsed;
-  if (state.plan === "free") return state.freeUsedThisMonth;
-  return 0;
-}
-
-function freeRemainingFor(state: BillingState): number {
-  if (isUnlimitedPlan(state.plan)) return Number.POSITIVE_INFINITY;
-  return Math.max(0, freeLimitFor(state.plan) - freeUsedFor(state));
-}
-
 /**
  * Generation gate.
- * Priority: premium/pro (pass) → free quota → ticket → blocked.
+ * 基本生成は無制限（Pro 機能とは別）。常に許可。
  */
 export function tryConsumeGeneration(raw: BillingState): ConsumeResult {
   const state = syncBillingMonth(raw);
 
-  // Local note/screenshot: Sold Pro 扱い（本番では isDevProBypassEnabled が常に false）
-  if (isDevProBypassEnabled()) {
+  if (isDevProBypassEnabled() || isUnlimitedPlan(state.plan)) {
     return { ok: true, source: "premium", state };
   }
 
-  if (isUnlimitedPlan(state.plan)) {
-    return { ok: true, source: "premium", state };
-  }
-
-  const freeRemaining = freeRemainingFor(state);
-  if (freeRemaining > 0) {
-    if (state.plan === "visitor") {
-      return {
-        ok: true,
-        source: "free",
-        state: { ...state, visitorUsed: state.visitorUsed + 1 },
-      };
-    }
-    return {
-      ok: true,
-      source: "free",
-      state: { ...state, freeUsedThisMonth: state.freeUsedThisMonth + 1 },
-    };
-  }
-
-  if (state.ticketBalance > 0) {
-    return {
-      ok: true,
-      source: "ticket",
-      state: { ...state, ticketBalance: state.ticketBalance - 1 },
-    };
-  }
-
-  return { ok: false, reason: "limit_reached", state };
+  return { ok: true, source: "free", state };
 }
 
 export function getQuotaSnapshot(
@@ -114,6 +67,7 @@ export function getQuotaSnapshot(
       isPaidPro: true,
       canUseProTrial: false,
       hasUsedProTrial: true,
+      freeCredits: 0,
       proTrialActive: false,
       freeRemaining: Number.POSITIVE_INFINITY,
       freeLimit: Number.POSITIVE_INFINITY,
@@ -129,20 +83,21 @@ export function getQuotaSnapshot(
   const isPaidPro = isUnlimitedPlan(state.plan);
   const isPro = isPaidPro || proTrialActive;
   const isPremium = isPro;
-  const hasUsedProTrial = Boolean(state.hasUsedProTrial);
+  const freeCredits = Math.max(0, Math.floor(state.freeCredits ?? 0));
+  // free_credits を正とする（残0なら必ず消費済み）
+  const hasUsedProTrial = freeCredits <= 0;
   const canUseProTrial =
     isAuthenticated &&
     (state.plan === "free" || state.plan === "visitor") &&
     !isPaidPro &&
-    !hasUsedProTrial &&
+    freeCredits >= 1 &&
     !proTrialActive;
 
-  const freeLimit = isPremium
-    ? Number.POSITIVE_INFINITY
-    : freeLimitFor(state.plan);
-  const freeRemaining = freeRemainingFor(state);
+  const freeLimit = Number.POSITIVE_INFINITY;
+  const freeRemaining = Number.POSITIVE_INFINITY;
   const ticketBalance = state.ticketBalance;
-  const canGenerate = isPremium || freeRemaining > 0 || ticketBalance > 0;
+  // 基本生成は常に無料・無制限
+  const canGenerate = true;
 
   const templateLimit = isPremium
     ? null
@@ -159,17 +114,12 @@ export function getQuotaSnapshot(
     indicatorLabel = "Sold Pro：一括生成・SEO予測つき無制限";
   } else if (proTrialActive) {
     indicatorLabel = "Proお試し中：今回限り解放";
-  } else if (state.plan === "visitor") {
-    indicatorLabel =
-      freeRemaining > 0
-        ? `お試し生成：あと${freeRemaining}回`
-        : "お試し枠を使い切りました";
+  } else if (canUseProTrial) {
+    indicatorLabel = `標準生成：無料無制限 · Proお試し残り${freeCredits}回`;
+  } else if (hasUsedProTrial) {
+    indicatorLabel = "標準生成：無料無制限 · Proお試し済み";
   } else {
-    if (freeRemaining > 0) {
-      indicatorLabel = `今月の無料枠：あと${freeRemaining}回`;
-    } else {
-      indicatorLabel = "今月の無料枠を使い切りました";
-    }
+    indicatorLabel = "標準生成：無料無制限";
   }
 
   return {
@@ -179,6 +129,7 @@ export function getQuotaSnapshot(
     isPaidPro,
     canUseProTrial,
     hasUsedProTrial,
+    freeCredits: hasUsedProTrial ? 0 : freeCredits,
     proTrialActive,
     freeRemaining,
     freeLimit,
@@ -235,8 +186,9 @@ export function registerAsFree(state: BillingState): BillingState {
     ...synced,
     plan: "free",
     freeUsedThisMonth: synced.freeUsedThisMonth,
-    // 新規無料登録はお試し未使用として開始（サーバー同期で上書き可）
-    hasUsedProTrial: synced.hasUsedProTrial,
+    // DB 同期前は既存の残枠を維持（消費済みを「残り1」に戻さない）
+    freeCredits: synced.freeCredits,
+    hasUsedProTrial: synced.freeCredits <= 0 || synced.hasUsedProTrial,
   };
 }
 

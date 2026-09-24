@@ -2,6 +2,10 @@
  * Auth メールリンク用の公開オリジン / コールバック URL
  * NEXT_PUBLIC_SITE_URL を優先（本番: https://fleama-maker.vercel.app）
  */
+
+export const AUTH_CONFIRMED_PATH = "/auth/confirmed";
+export const PASSWORD_RESET_NOTICE_PATH = "/auth/password-reset-notice";
+
 export function getAuthRedirectBase(request?: Request): string {
   const env = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "");
   if (env) return env;
@@ -19,18 +23,15 @@ export function getAuthRedirectBase(request?: Request): string {
   return "http://localhost:3000";
 }
 
-/** 新規登録・メール確認後のコールバック → /auth/callback */
+/** 新規登録・メール確認後 → /auth/confirmed（元タブへ戻る案内） */
 export function getAuthCallbackUrl(
-  nextPath = "/",
+  _nextPath = "/",
   request?: Request,
 ): string {
-  const base = getAuthRedirectBase(request);
-  const next = nextPath.startsWith("/") ? nextPath : "/";
-  if (next === "/") return `${base}/auth/callback`;
-  return `${base}/auth/callback?next=${encodeURIComponent(next)}`;
+  return `${getAuthRedirectBase(request)}${AUTH_CONFIRMED_PATH}`;
 }
 
-/** パスワードリセットメールの戻り先 → /auth/reset-password */
+/** パスワードリセットメールの戻り先 → /auth/password-reset-notice */
 export function getPasswordResetRedirectUrl(request?: Request): string {
-  return `${getAuthRedirectBase(request)}/auth/reset-password`;
+  return `${getAuthRedirectBase(request)}${PASSWORD_RESET_NOTICE_PATH}`;
 }

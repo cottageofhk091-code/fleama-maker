@@ -15,8 +15,10 @@ export type UserProfileInput = {
   plan_type?: string | null;
   age_group?: string | null;
   region?: string | null;
-  /** Pro機能の1回無料お試しを使用済みか */
+  /** Pro機能の1回無料お試しを使用済みか（free_credits<=0 と同期） */
   has_used_pro_trial?: boolean | null;
+  /** Pro 無料枠残数（新規 1） */
+  free_credits?: number | null;
 };
 
 export type VisitSourceCategory =
@@ -211,7 +213,7 @@ export async function saveUserProfile(
   const supabase = getSupabase();
   if (!supabase) return;
 
-  const row: Record<string, string | boolean | null> = {
+  const row: Record<string, string | boolean | number | null> = {
     id: params.user_id,
     app_id: APP_ID,
   };
@@ -224,8 +226,14 @@ export async function saveUserProfile(
   if (params.region !== undefined) {
     row.region = params.region;
   }
-  if (params.has_used_pro_trial !== undefined) {
-    row.has_used_pro_trial = Boolean(params.has_used_pro_trial);
+  if (params.free_credits !== undefined && params.free_credits !== null) {
+    const credits = Math.max(0, Math.floor(params.free_credits));
+    row.free_credits = credits;
+    row.has_used_pro_trial = credits <= 0;
+  } else if (params.has_used_pro_trial !== undefined) {
+    const used = Boolean(params.has_used_pro_trial);
+    row.has_used_pro_trial = used;
+    row.free_credits = used ? 0 : 1;
   }
 
   const { error } = await supabase.from("profiles").upsert([row], {
@@ -237,18 +245,23 @@ export async function saveUserProfile(
   }
 }
 
+export type FreeCreditsSnapshot = {
+  freeCredits: number;
+  hasUsedProTrial: boolean;
+};
+
 /**
- * profiles から Pro お試し消費フラグを取得
+ * profiles から free_credits / お試し消費状態を取得
  */
-export async function fetchHasUsedProTrial(
+export async function fetchFreeCredits(
   userId: string,
-): Promise<boolean | null> {
+): Promise<FreeCreditsSnapshot | null> {
   const supabase = getSupabase();
   if (!supabase || !userId.trim()) return null;
 
   const { data, error } = await supabase
     .from("profiles")
-    .select("has_used_pro_trial")
+    .select("free_credits, has_used_pro_trial")
     .eq("id", userId)
     .maybeSingle();
 
@@ -256,8 +269,39 @@ export async function fetchHasUsedProTrial(
     console.error("Supabase profiles select error:", error);
     return null;
   }
-  if (!data) return false;
-  return Boolean(
-    (data as { has_used_pro_trial?: boolean | null }).has_used_pro_trial,
-  );
+  if (!data) {
+    return { freeCredits: 1, hasUsedProTrial: false };
+  }
+
+  const row = data as {
+    free_credits?: number | null;
+    has_used_pro_trial?: boolean | null;
+  };
+  const usedFlag = Boolean(row.has_used_pro_trial);
+  let freeCredits =
+    typeof row.free_credits === "number" && !Number.isNaN(row.free_credits)
+      ? Math.max(0, Math.floor(row.free_credits))
+      : usedFlag
+        ? 0
+        : 1;
+  // どちらか一方でも消費済みなら残0（再ログインで戻さない）
+  if (usedFlag || freeCredits <= 0) {
+    freeCredits = 0;
+  }
+  return {
+    freeCredits,
+    hasUsedProTrial: freeCredits <= 0,
+  };
+}
+
+/**
+ * profiles から Pro お試し消費フラグを取得
+ * @deprecated fetchFreeCredits を利用してください
+ */
+export async function fetchHasUsedProTrial(
+  userId: string,
+): Promise<boolean | null> {
+  const snap = await fetchFreeCredits(userId);
+  if (!snap) return null;
+  return snap.hasUsedProTrial;
 }

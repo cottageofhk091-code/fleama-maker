@@ -3,7 +3,10 @@
  * From は常に固定（共有 Supabase SMTP は使わない）
  */
 export const RESEND_FROM = "フリマリストSold <noreply@cloudflowriver.com>" as const;
-export const RESEND_APP_NAME = "フリマリストSold" as const;
+/** メール件名用の短いアプリ名 */
+export const RESEND_APP_NAME = "フリマリスト" as const;
+/** From 表示名（差出人） */
+export const RESEND_FROM_DISPLAY_NAME = "フリマリストSold" as const;
 
 export type SendResendEmailParams = {
   to: string | string[];

@@ -25,8 +25,10 @@ export type BillingState = {
   templates: SavedTemplate[];
   /** Stripe Customer ID (cus_...) for Customer Portal */
   stripeCustomerId?: string;
-  /** Pro 1回お試しを消費済み（profiles.has_used_pro_trial と同期） */
+  /** Pro 1回お試しを消費済み（profiles.free_credits<=0 と同期） */
   hasUsedProTrial: boolean;
+  /** Pro 無料枠残数（DB: profiles.free_credits） */
+  freeCredits: number;
 };
 
 export type ConsumeResult =
@@ -49,10 +51,12 @@ export type QuotaSnapshot = {
   isPro: boolean;
   /** 課金 Pro（お試しロック解除を含まない） */
   isPaidPro: boolean;
-  /** ログイン済み無料会員でまだお試し未使用 */
+  /** ログイン済み無料会員でまだお試し未使用（freeCredits >= 1） */
   canUseProTrial: boolean;
   /** お試し消費済み */
   hasUsedProTrial: boolean;
+  /** Pro 無料枠残数 */
+  freeCredits: number;
   /** 今回セッションでお試し解放中 */
   proTrialActive: boolean;
   /** Remaining free/trial generations (Infinity for premium/pro) */

@@ -6,11 +6,25 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
+import { PasswordRecoveryModal } from "@/components/password-recovery-modal";
+import { WelcomeBanner } from "@/components/welcome-banner";
 import { translateAuthError } from "@/lib/auth-errors";
+import {
+  AUTH_CHANNEL,
+  AUTH_PING_KEY,
+  AUTH_RECOVERY_PING_KEY,
+  SIGNUP_WELCOME_MESSAGE,
+  clearPendingRecovery,
+  clearPendingSignup,
+  hasPendingRecovery,
+  hasPendingSignup,
+  isAuthHelperPage,
+} from "@/lib/auth-tab-sync";
 import { getSupabase } from "@/lib/supabase";
 import {
   getDevPersona,
@@ -32,6 +46,10 @@ type AuthContextValue = {
   signOut: () => Promise<void>;
   /** パスワード更新（リセット画面用・メール送信なし） */
   updatePassword: (password: string) => Promise<AuthResult>;
+  welcomeMessage: string | null;
+  clearWelcomeMessage: () => void;
+  passwordRecoveryOpen: boolean;
+  closePasswordRecovery: () => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -45,6 +63,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [devPersona, setDevPersona] = useState<DevPersona | null>(null);
+  const [welcomeMessage, setWelcomeMessage] = useState<string | null>(null);
+  const [passwordRecoveryOpen, setPasswordRecoveryOpen] = useState(false);
+  const wasLoggedInRef = useRef(false);
 
   useEffect(() => {
     const supabase = getSupabase();
@@ -57,16 +78,87 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
       setSession(data.session);
+      wasLoggedInRef.current = Boolean(data.session);
       setReady(true);
     });
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, next) => {
       setSession(next);
+
+      if (isAuthHelperPage()) return;
+
+      if (
+        event === "PASSWORD_RECOVERY" ||
+        (hasPendingRecovery() && event === "SIGNED_IN")
+      ) {
+        setPasswordRecoveryOpen(true);
+        clearPendingRecovery();
+        if (event === "PASSWORD_RECOVERY") return;
+      }
+
+      if (event === "SIGNED_IN" && next?.user) {
+        const pending = hasPendingSignup();
+        if (pending || !wasLoggedInRef.current) {
+          if (pending) {
+            setWelcomeMessage(SIGNUP_WELCOME_MESSAGE);
+            clearPendingSignup();
+          }
+        }
+        wasLoggedInRef.current = true;
+      }
+
+      if (event === "SIGNED_OUT") {
+        wasLoggedInRef.current = false;
+        setWelcomeMessage(null);
+        setPasswordRecoveryOpen(false);
+      }
     });
+
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === AUTH_RECOVERY_PING_KEY && e.newValue) {
+        if (!isAuthHelperPage()) setPasswordRecoveryOpen(true);
+        return;
+      }
+      if (e.key !== AUTH_PING_KEY || !e.newValue) return;
+      if (isAuthHelperPage()) return;
+      void supabase.auth.getSession().then(({ data }) => {
+        setSession(data.session);
+        if (data.session && hasPendingSignup()) {
+          setWelcomeMessage(SIGNUP_WELCOME_MESSAGE);
+          clearPendingSignup();
+        }
+      });
+    };
+    window.addEventListener("storage", onStorage);
+
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel(AUTH_CHANNEL);
+      channel.onmessage = (event) => {
+        if (isAuthHelperPage()) return;
+        if (event?.data?.type === "password-recovery") {
+          setPasswordRecoveryOpen(true);
+          return;
+        }
+        if (event?.data?.type === "signup-confirmed") {
+          void supabase.auth.getSession().then(({ data }) => {
+            setSession(data.session);
+            if (data.session) {
+              setWelcomeMessage(SIGNUP_WELCOME_MESSAGE);
+              clearPendingSignup();
+            }
+          });
+        }
+      };
+    } catch {
+      channel = null;
+    }
 
     return () => {
       mounted = false;
       sub.subscription.unsubscribe();
+      window.removeEventListener("storage", onStorage);
+      channel?.close();
     };
   }, []);
 
@@ -112,7 +204,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         error: translateAuthError(error.message),
       };
     }
+    clearPendingRecovery();
     return { ok: true as const };
+  }, []);
+
+  const clearWelcomeMessage = useCallback(() => {
+    setWelcomeMessage(null);
+  }, []);
+
+  const closePasswordRecovery = useCallback(() => {
+    setPasswordRecoveryOpen(false);
+    clearPendingRecovery();
   }, []);
 
   const devUnauthenticated = devPersona === "unauthenticated";
@@ -126,12 +228,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn,
       signOut,
       updatePassword,
+      welcomeMessage,
+      clearWelcomeMessage,
+      passwordRecoveryOpen,
+      closePasswordRecovery,
     }),
-    [ready, session, devUnauthenticated, signIn, signOut, updatePassword],
+    [
+      ready,
+      session,
+      devUnauthenticated,
+      signIn,
+      signOut,
+      updatePassword,
+      welcomeMessage,
+      clearWelcomeMessage,
+      passwordRecoveryOpen,
+      closePasswordRecovery,
+    ],
   );
 
   return (
-    <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={value}>
+      {welcomeMessage && (
+        <WelcomeBanner
+          message={welcomeMessage}
+          onDismiss={clearWelcomeMessage}
+        />
+      )}
+      {children}
+      <PasswordRecoveryModal
+        open={passwordRecoveryOpen}
+        onClose={closePasswordRecovery}
+      />
+    </AuthContext.Provider>
   );
 }
 

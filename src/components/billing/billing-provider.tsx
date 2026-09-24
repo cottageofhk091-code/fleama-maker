@@ -36,7 +36,7 @@ import {
 } from "@/lib/billing/dev-persona";
 import {
   consumeProTrialRemote,
-  loadHasUsedProTrialFromServer,
+  loadFreeCreditsFromServer,
   persistAnalyticsProfile,
 } from "@/lib/analytics-profile-client";
 import { useAuth } from "@/components/auth-provider";
@@ -65,11 +65,11 @@ type BillingContextValue = {
     name: string,
     payload: Record<string, unknown>,
   ) => { ok: true } | { ok: false; reason: "template_limit" };
-  /** Pro 1回お試しを開始（解放 + 消費マーク） */
+  /** Pro 1回お試しを開始（解放 + DB消費） */
   startProTrial: () => Promise<boolean>;
   /** 課金 Pro またはお試しで解放できれば true */
   ensureProTrialOrPaid: () => Promise<boolean>;
-  /** お試しセッションを終了（次回からモザイク） */
+  /** お試しセッションを終了（次回からモザイク。残枠は戻さない） */
   endProTrialSession: () => void;
 };
 
@@ -81,16 +81,22 @@ function applyDevPersonaToState(
 ): BillingState {
   if (!persona) return state;
   if (persona === "unauthenticated") {
-    return { ...state, plan: "visitor", hasUsedProTrial: true };
+    return {
+      ...state,
+      plan: "visitor",
+      hasUsedProTrial: true,
+      freeCredits: 0,
+    };
   }
   if (persona === "free") {
     return {
       ...state,
       plan: "free",
       hasUsedProTrial: false,
+      freeCredits: 1,
     };
   }
-  return { ...state, plan: "pro" };
+  return { ...state, plan: "pro", freeCredits: 0, hasUsedProTrial: true };
 }
 
 export function BillingProvider({ children }: { children: ReactNode }) {
@@ -107,8 +113,14 @@ export function BillingProvider({ children }: { children: ReactNode }) {
   const trialConsumingRef = useRef(false);
 
   const persist = useCallback((next: BillingState) => {
-    stateRef.current = next;
-    setState(next);
+    const freeCredits = Math.max(0, Math.floor(next.freeCredits ?? 0));
+    const normalized: BillingState = {
+      ...next,
+      freeCredits,
+      hasUsedProTrial: freeCredits <= 0 || Boolean(next.hasUsedProTrial),
+    };
+    stateRef.current = normalized;
+    setState(normalized);
   }, []);
 
   useEffect(() => {
@@ -136,7 +148,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     saveBillingState(state);
   }, [state, ready]);
 
-  // ログイン済みなら visitor → free へ昇格し、お試しフラグをサーバー同期
+  // ログイン済みなら visitor → free へ昇格し、free_credits をサーバー同期
   useEffect(() => {
     if (!ready || !authReady) return;
     if (!user?.id) {
@@ -146,7 +158,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
 
     let cancelled = false;
     void (async () => {
-      const remote = await loadHasUsedProTrialFromServer(user.id);
+      const remote = await loadFreeCreditsFromServer(user.id);
       if (cancelled) return;
 
       const current = stateRef.current;
@@ -154,12 +166,21 @@ export function BillingProvider({ children }: { children: ReactNode }) {
         current.plan === "visitor" || current.plan === "free"
           ? ("free" as const)
           : current.plan;
+
+      // DB を正とする（再ログインで「残り1回」に戻さない）
+      const freeCredits =
+        remote == null
+          ? current.freeCredits
+          : remote.freeCredits;
       const hasUsed =
-        remote == null ? Boolean(current.hasUsedProTrial) : remote;
+        remote == null
+          ? current.freeCredits <= 0 || current.hasUsedProTrial
+          : remote.hasUsedProTrial;
 
       persist({
         ...current,
         plan: nextPlan === "premium" ? "pro" : nextPlan,
+        freeCredits: hasUsed ? 0 : freeCredits,
         hasUsedProTrial: hasUsed,
       });
 
@@ -167,6 +188,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
         persistAnalyticsProfile({
           user_id: user.id,
           plan_type: PROFILE_PLAN.free,
+          free_credits: hasUsed ? 0 : freeCredits,
           has_used_pro_trial: hasUsed,
         });
       }
@@ -223,29 +245,10 @@ export function BillingProvider({ children }: { children: ReactNode }) {
   }, [ready, quota.isPaidPro, paywallOpen]);
 
   const rollbackReservation = useCallback(
-    (source: ConsumeSource) => {
-      if (getDevPersona()) return;
-      const prev = stateRef.current;
-      if (source === "premium") return;
-      if (source === "ticket") {
-        persist({ ...prev, ticketBalance: prev.ticketBalance + 1 });
-        return;
-      }
-      if (prev.plan === "visitor") {
-        persist({
-          ...prev,
-          visitorUsed: Math.max(0, prev.visitorUsed - 1),
-        });
-        return;
-      }
-      if (prev.plan === "free") {
-        persist({
-          ...prev,
-          freeUsedThisMonth: Math.max(0, prev.freeUsedThisMonth - 1),
-        });
-      }
+    (_source: ConsumeSource) => {
+      // 基本生成は無制限のためロールバック不要
     },
-    [persist],
+    [],
   );
 
   const setPlanForDemo = useCallback(
@@ -256,7 +259,8 @@ export function BillingProvider({ children }: { children: ReactNode }) {
         ...createDefaultBillingState(normalized),
         ticketBalance: normalized === "pro" ? 0 : current.ticketBalance,
         stripeCustomerId: current.stripeCustomerId,
-        hasUsedProTrial: normalized === "free" ? false : current.hasUsedProTrial,
+        freeCredits: normalized === "free" ? 1 : 0,
+        hasUsedProTrial: normalized !== "free",
         templates:
           normalized === "visitor"
             ? []
@@ -270,10 +274,11 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       if (normalized === "free") {
         persistAnalyticsProfile({
           plan_type: PROFILE_PLAN.free,
+          free_credits: 1,
           has_used_pro_trial: false,
         });
       } else if (normalized === "pro") {
-        persistAnalyticsProfile({ plan_type: PROFILE_PLAN.paid });
+        persistAnalyticsProfile({ plan_type: PROFILE_PLAN.paid, free_credits: 0 });
       }
     },
     [persist],
@@ -305,25 +310,25 @@ export function BillingProvider({ children }: { children: ReactNode }) {
 
     if (snap.isPaidPro) return true;
     if (proTrialActive) return true;
-    if (snap.hasUsedProTrial && !proTrialActive) return false;
+    if (snap.freeCredits <= 0 || snap.hasUsedProTrial) return false;
     if (!authenticated) return false;
 
-    // visitor のままなら free に昇格してからお試し
     if (stateRef.current.plan === "visitor" && !persona) {
       persist({
         ...registerAsFree(stateRef.current),
-        hasUsedProTrial: false,
       });
     }
 
     if (trialConsumingRef.current) return true;
     trialConsumingRef.current = true;
     try {
+      // 先にローカルを 0 にして再実行時も即座にモザイク
       setProTrialActive(true);
       persist({
         ...stateRef.current,
         plan:
           stateRef.current.plan === "visitor" ? "free" : stateRef.current.plan,
+        freeCredits: 0,
         hasUsedProTrial: true,
       });
       if (persona !== "free") {
@@ -344,15 +349,21 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       { proTrialActive, isAuthenticated: authenticated },
     );
     if (snap.isPro) return true;
-    if (snap.canUseProTrial || (authenticated && !snap.hasUsedProTrial)) {
+    if (snap.canUseProTrial || (authenticated && snap.freeCredits >= 1)) {
       return startProTrial();
     }
     return false;
   }, [proTrialActive, startProTrial, user]);
 
   const endProTrialSession = useCallback(() => {
+    // 残枠は戻さない。セッション解放だけ終了してモザイク適用
     setProTrialActive(false);
-  }, []);
+    persist({
+      ...stateRef.current,
+      freeCredits: 0,
+      hasUsedProTrial: true,
+    });
+  }, [persist]);
 
   const value = useMemo<BillingContextValue>(
     () => ({
@@ -371,17 +382,25 @@ export function BillingProvider({ children }: { children: ReactNode }) {
         persist(upgradeToPro(stateRef.current));
         setPaywallOpen(false);
         setProTrialActive(false);
-        persistAnalyticsProfile({ plan_type: PROFILE_PLAN.paid });
+        persistAnalyticsProfile({ plan_type: PROFILE_PLAN.paid, free_credits: 0 });
       },
       becomeFreeUser: () => {
+        // 新規登録直後: まだ DB 同期前なら 1 回付与。既に 0 なら維持
+        const current = stateRef.current;
+        const freeCredits =
+          current.hasUsedProTrial || current.freeCredits <= 0
+            ? 0
+            : Math.max(1, current.freeCredits);
         persist({
-          ...registerAsFree(stateRef.current),
-          hasUsedProTrial: false,
+          ...registerAsFree(current),
+          freeCredits,
+          hasUsedProTrial: freeCredits <= 0,
         });
         setProTrialActive(false);
         persistAnalyticsProfile({
           plan_type: PROFILE_PLAN.free,
-          has_used_pro_trial: false,
+          free_credits: freeCredits,
+          has_used_pro_trial: freeCredits <= 0,
         });
       },
       setPlanForDemo,

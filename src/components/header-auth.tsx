@@ -9,6 +9,7 @@ import { BrandMark } from "@/components/brand-mark";
 import { CenterModal } from "@/components/center-modal";
 import { registerViaApi } from "@/lib/auth-api-client";
 import { translateAuthError } from "@/lib/auth-errors";
+import { markPendingSignup } from "@/lib/auth-tab-sync";
 import { SITE_NAME } from "@/lib/site";
 
 type Mode = "login" | "signup";
@@ -76,8 +77,9 @@ export function HeaderAuthModal({
       return;
     }
     becomeFreeUser();
+    markPendingSignup(email.trim());
     setInfo(
-      "確認メールを送信しました。メール内の「登録を完了する」リンクをクリックすると自動でログインし、トップページへ移動します。Pro機能は1回無料でお試しできます。",
+      "確認メールを送信しました。メール内の「登録を完了する」リンクをクリックすると認証が完了します。元のこの画面に戻ると自動でログインし、Pro機能を1回無料でお試しできます。",
     );
   }
 
