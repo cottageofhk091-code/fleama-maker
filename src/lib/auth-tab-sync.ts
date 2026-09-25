@@ -20,8 +20,11 @@ export const AUTH_PING_KEY = "fleama_auth_ping";
 export const AUTH_RECOVERY_PING_KEY = "fleama_auth_recovery_ping";
 export const AUTH_CHANNEL = "fleama_auth";
 
-export const SIGNUP_WELCOME_MESSAGE =
-  "会員登録ありがとうございます！Pro機能を1回無料でお試しいただけます。";
+export const SIGNUP_WELCOME_TITLE = "🎉 会員登録が完了しました！";
+export const SIGNUP_WELCOME_BODY =
+  "ご登録いただきありがとうございます。Pro機能を1回無料でお試しいただけます。さっそく機能をご利用ください！";
+/** 互換: 旧バナー用の一文 */
+export const SIGNUP_WELCOME_MESSAGE = SIGNUP_WELCOME_BODY;
 
 export const AUTH_UI_EVENT = "fleama_auth_ui";
 

@@ -13,13 +13,12 @@ import {
 import type { Session, User } from "@supabase/supabase-js";
 import { PasswordRecoveryModal } from "@/components/password-recovery-modal";
 import { RegistrationFocusSync } from "@/components/registration-focus-sync";
-import { WelcomeBanner } from "@/components/welcome-banner";
+import { WelcomeModal } from "@/components/welcome-modal";
 import { translateAuthError } from "@/lib/auth-errors";
 import {
   AUTH_CHANNEL,
   AUTH_RECOVERY_PING_KEY,
   AUTH_UI_EVENT,
-  SIGNUP_WELCOME_MESSAGE,
   type AuthUiEventDetail,
   clearPendingRecovery,
   clearPendingSignup,
@@ -49,8 +48,9 @@ type AuthContextValue = {
   signOut: () => Promise<void>;
   /** パスワード更新（リセット画面用・メール送信なし） */
   updatePassword: (password: string) => Promise<AuthResult>;
-  welcomeMessage: string | null;
-  clearWelcomeMessage: () => void;
+  /** 会員登録完了モーダル表示中 */
+  welcomeOpen: boolean;
+  closeWelcome: () => void;
   passwordRecoveryOpen: boolean;
   closePasswordRecovery: () => void;
 };
@@ -69,7 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [devPersona, setDevPersona] = useState<DevPersona | null>(null);
-  const [welcomeMessage, setWelcomeMessage] = useState<string | null>(null);
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [passwordRecoveryOpen, setPasswordRecoveryOpen] = useState(false);
   const wasLoggedInRef = useRef(false);
   const welcomeShownRef = useRef(false);
@@ -79,14 +79,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const showSignupWelcome = useCallback(
-    (message?: string) => {
+    (_message?: string) => {
       closeAuthModals();
       if (welcomeShownRef.current) {
         clearPendingSignup();
         return;
       }
       welcomeShownRef.current = true;
-      setWelcomeMessage(message?.trim() || SIGNUP_WELCOME_MESSAGE);
+      setWelcomeOpen(true);
       clearPendingSignup();
       window.setTimeout(() => closeAuthModals(), 0);
       window.setTimeout(() => closeAuthModals(), 250);
@@ -171,7 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (event === "SIGNED_OUT") {
         wasLoggedInRef.current = false;
         welcomeShownRef.current = false;
-        setWelcomeMessage(null);
+        setWelcomeOpen(false);
         setPasswordRecoveryOpen(false);
       }
     });
@@ -263,8 +263,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { ok: true as const };
   }, []);
 
-  const clearWelcomeMessage = useCallback(() => {
-    setWelcomeMessage(null);
+  const closeWelcome = useCallback(() => {
+    setWelcomeOpen(false);
   }, []);
 
   const closePasswordRecovery = useCallback(() => {
@@ -283,8 +283,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn,
       signOut,
       updatePassword,
-      welcomeMessage,
-      clearWelcomeMessage,
+      welcomeOpen,
+      closeWelcome,
       passwordRecoveryOpen,
       closePasswordRecovery,
     }),
@@ -295,8 +295,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn,
       signOut,
       updatePassword,
-      welcomeMessage,
-      clearWelcomeMessage,
+      welcomeOpen,
+      closeWelcome,
       passwordRecoveryOpen,
       closePasswordRecovery,
     ],
@@ -309,12 +309,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         onShowWelcome={onShowWelcome}
         welcomeAlreadyShown={welcomeAlreadyShown}
       />
-      {welcomeMessage && (
-        <WelcomeBanner
-          message={welcomeMessage}
-          onDismiss={clearWelcomeMessage}
-        />
-      )}
+      <WelcomeModal open={welcomeOpen} onClose={closeWelcome} />
       {children}
       <PasswordRecoveryModal
         open={passwordRecoveryOpen}
