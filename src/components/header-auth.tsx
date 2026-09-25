@@ -96,8 +96,9 @@ export function HeaderAuthModal({
       setError(translateAuthError(result.error));
       return;
     }
-    becomeFreeUser();
+    // 認証完了検知用フラグを先にセット（元タブ戻りで歓迎モーダル表示）
     markPendingSignup(email.trim());
+    becomeFreeUser();
     setInfo(
       "確認メールを送信しました。メール内の「登録を完了する」リンクをクリックすると認証が完了します。元のこの画面に戻ると自動でログインし、Pro機能を1回無料でお試しできます。",
     );

@@ -17,6 +17,7 @@ import { WelcomeModal } from "@/components/welcome-modal";
 import { translateAuthError } from "@/lib/auth-errors";
 import {
   AUTH_CHANNEL,
+  AUTH_PING_KEY,
   AUTH_RECOVERY_PING_KEY,
   AUTH_UI_EVENT,
   type AuthUiEventDetail,
@@ -83,27 +84,74 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const showSignupWelcome = useCallback(
     (_message?: string) => {
       closeAuthModals();
-      const userId =
-        session?.user?.id ??
-        null;
-      // session 未反映時は Supabase から取得を試みる（同期的に最新を読む）
-      void (async () => {
-        let uid = userId;
-        if (!uid) {
-          const { data } = (await getSupabase()?.auth.getSession()) ?? {
-            data: { session: null },
-          };
-          uid = data.session?.user?.id ?? null;
+
+      if (welcomeShownRef.current) {
+        clearPendingSignup();
+        return;
+      }
+
+      // 表示条件: pending_registration=true、または確認タブからの直近 ping
+      let pingFresh = false;
+      try {
+        const ping = localStorage.getItem(AUTH_PING_KEY);
+        if (ping) {
+          const parsed = JSON.parse(ping) as { at?: number };
+          pingFresh = Boolean(
+            parsed.at && Date.now() - parsed.at < 5 * 60 * 1000,
+          );
         }
-        if (welcomeShownRef.current || hasSignupWelcomeShown(uid)) {
+      } catch {
+        pingFresh = false;
+      }
+      if (!hasPendingSignup() && !pingFresh) {
+        return;
+      }
+
+      void (async () => {
+        if (welcomeShownRef.current) return;
+
+        const { data } = (await getSupabase()?.auth.getSession()) ?? {
+          data: { session: null },
+        };
+        const uid = data.session?.user?.id ?? session?.user?.id ?? null;
+
+        // ログインセッションがまだ無い場合は次の focus/SIGNED_IN に任せる
+        if (!uid) return;
+
+        if (hasSignupWelcomeShown(uid)) {
           clearPendingSignup();
-          markSignupWelcomeShown(uid);
+          try {
+            localStorage.removeItem(AUTH_PING_KEY);
+          } catch {
+            // ignore
+          }
           return;
         }
+
+        // まだ pending / ping が有効か再確認
+        let stillPing = false;
+        try {
+          const ping = localStorage.getItem(AUTH_PING_KEY);
+          if (ping) {
+            const parsed = JSON.parse(ping) as { at?: number };
+            stillPing = Boolean(
+              parsed.at && Date.now() - parsed.at < 5 * 60 * 1000,
+            );
+          }
+        } catch {
+          stillPing = false;
+        }
+        if (!hasPendingSignup() && !stillPing) return;
+
         welcomeShownRef.current = true;
-        markSignupWelcomeShown(uid);
         setWelcomeOpen(true);
+        markSignupWelcomeShown(uid);
         clearPendingSignup();
+        try {
+          localStorage.removeItem(AUTH_PING_KEY);
+        } catch {
+          // ignore
+        }
         window.setTimeout(() => closeAuthModals(), 0);
         window.setTimeout(() => closeAuthModals(), 250);
       })();
@@ -293,8 +341,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setWelcomeOpen(false);
     clearPendingSignup();
     const uid = session?.user?.id;
-    markSignupWelcomeShown(uid);
+    if (uid) markSignupWelcomeShown(uid);
     welcomeShownRef.current = true;
+    try {
+      localStorage.removeItem(AUTH_PING_KEY);
+    } catch {
+      // ignore
+    }
   }, [session?.user?.id]);
 
   const closePasswordRecovery = useCallback(() => {

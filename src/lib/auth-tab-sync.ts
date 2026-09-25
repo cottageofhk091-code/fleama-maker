@@ -50,14 +50,8 @@ function welcomeShownStorageKey(userId: string): string {
   return `${SIGNUP_WELCOME_SHOWN_PREFIX}${userId}`;
 }
 
-/** 感謝ダイアログ表示済みを永続化（リロード重複防止） */
+/** 感謝ダイアログ表示済みを永続化（リロード重複防止）。pending は消さない */
 export function markSignupWelcomeShown(userId?: string | null): void {
-  clearPendingSignup();
-  try {
-    localStorage.removeItem(AUTH_PING_KEY);
-  } catch {
-    // ignore
-  }
   if (!userId?.trim()) return;
   try {
     localStorage.setItem(
@@ -87,12 +81,21 @@ export function clearSignupWelcomeShown(userId?: string | null): void {
   }
 }
 
-/** 新規登録メール送信直後に呼ぶ */
+/** 新規登録メール送信直後に呼ぶ — pending_registration=true を必ずセット */
 export function markPendingSignup(_email?: string): void {
   try {
     localStorage.setItem(PENDING_REGISTRATION_KEY, "true");
   } catch {
     // ignore
+  }
+  // 旧キーも掃除して単一フラグに統一
+  for (const key of LEGACY_PENDING_KEYS) {
+    try {
+      localStorage.removeItem(key);
+      sessionStorage.removeItem(key);
+    } catch {
+      // ignore
+    }
   }
 }
 
@@ -180,7 +183,11 @@ export function notifySignupConfirmed(payload: { bonusGranted?: boolean } = {}):
   }
   dispatchAuthUiEvent({ type: "close-auth-modal" });
   dispatchAuthUiEvent({ type: "signup-confirmed", ...payload });
-  // show-welcome は元タブ側で pending_registration + 未表示チェック後に行う
+  // 元タブで pending_registration を見て歓迎モーダルを出す
+  dispatchAuthUiEvent({
+    type: "show-welcome",
+    message: SIGNUP_WELCOME_MESSAGE,
+  });
 }
 
 export function notifyPasswordRecovery(): void {
