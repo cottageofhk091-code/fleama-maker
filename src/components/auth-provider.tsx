@@ -19,6 +19,7 @@ import {
   AUTH_PING_KEY,
   AUTH_RECOVERY_PING_KEY,
   AUTH_UI_EVENT,
+  PENDING_REGISTRATION_KEY,
   SIGNUP_WELCOME_MESSAGE,
   type AuthUiEventDetail,
   clearPendingRecovery,
@@ -71,13 +72,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const wasLoggedInRef = useRef(false);
   const welcomeShownRef = useRef(false);
 
-  const showSignupWelcome = useCallback(() => {
-    if (welcomeShownRef.current) return;
-    welcomeShownRef.current = true;
-    setWelcomeMessage(SIGNUP_WELCOME_MESSAGE);
-    clearPendingSignup();
+  const closeAuthModals = useCallback(() => {
     dispatchAuthUiEvent({ type: "close-auth-modal" });
   }, []);
+
+  const showSignupWelcome = useCallback(
+    (message?: string) => {
+      closeAuthModals();
+      if (welcomeShownRef.current) {
+        // 二重歓迎は出さないが、モーダルは必ず閉じる
+        clearPendingSignup();
+        return;
+      }
+      welcomeShownRef.current = true;
+      setWelcomeMessage(message?.trim() || SIGNUP_WELCOME_MESSAGE);
+      clearPendingSignup();
+      // 念のためもう一度閉じる（Header 未マウント対策）
+      window.setTimeout(() => closeAuthModals(), 0);
+      window.setTimeout(() => closeAuthModals(), 300);
+    },
+    [closeAuthModals],
+  );
 
   useEffect(() => {
     const supabase = getSupabase();
@@ -87,23 +102,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     let mounted = true;
+
+    const syncFromSession = async (opts?: {
+      forceWelcome?: boolean;
+      fromEvent?: string;
+    }) => {
+      if (!mounted || isAuthHelperPage()) return;
+      const { data } = await supabase.auth.getSession();
+      if (!mounted) return;
+
+      const next = data.session;
+      setSession(next);
+
+      const pending = hasPendingSignup();
+      const justLoggedIn = Boolean(next?.user) && !wasLoggedInRef.current;
+
+      if (next?.user) {
+        closeAuthModals();
+        wasLoggedInRef.current = true;
+        if (pending || opts?.forceWelcome) {
+          showSignupWelcome();
+        } else if (
+          justLoggedIn &&
+          (opts?.fromEvent === "SIGNED_IN" || opts?.forceWelcome)
+        ) {
+          // pending が消えていても AUTH_PING 直後は歓迎
+          try {
+            const ping = localStorage.getItem(AUTH_PING_KEY);
+            if (ping) {
+              const parsed = JSON.parse(ping) as { at?: number };
+              if (parsed.at && Date.now() - parsed.at < 5 * 60 * 1000) {
+                showSignupWelcome();
+                localStorage.removeItem(AUTH_PING_KEY);
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
+      }
+    };
+
     void supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
       setSession(data.session);
       wasLoggedInRef.current = Boolean(data.session);
       setReady(true);
-      // 確認完了後に元タブへ戻った直後など、既にセッションがある場合
       if (data.session && hasPendingSignup() && !isAuthHelperPage()) {
         showSignupWelcome();
       }
     });
 
-    const handleSessionEstablished = (
-      event: string,
-      next: Session | null,
-    ) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, next) => {
       setSession(next);
-
       if (isAuthHelperPage()) return;
 
       if (
@@ -113,17 +164,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ) {
         setPasswordRecoveryOpen(true);
         clearPendingRecovery();
-        dispatchAuthUiEvent({ type: "close-auth-modal" });
+        closeAuthModals();
         if (event === "PASSWORD_RECOVERY") return;
       }
 
       if (
-        (event === "SIGNED_IN" || event === "INITIAL_SESSION") &&
+        (event === "SIGNED_IN" ||
+          event === "INITIAL_SESSION" ||
+          event === "TOKEN_REFRESHED" ||
+          event === "USER_UPDATED") &&
         next?.user
       ) {
-        // ログイン成立 → 認証モーダルを必ず閉じる
-        dispatchAuthUiEvent({ type: "close-auth-modal" });
-
+        closeAuthModals();
         if (hasPendingSignup()) {
           showSignupWelcome();
         }
@@ -136,54 +188,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setWelcomeMessage(null);
         setPasswordRecoveryOpen(false);
       }
-    };
-
-    const { data: sub } = supabase.auth.onAuthStateChange((event, next) => {
-      handleSessionEstablished(event, next);
     });
 
-    const hydrateAfterConfirm = (opts?: { forceWelcome?: boolean }) => {
-      if (isAuthHelperPage()) return;
-      void (async () => {
-        for (let i = 0; i < 6; i += 1) {
-          const { data } = await supabase.auth.getSession();
-          if (!mounted) return;
-          if (data.session) {
-            setSession(data.session);
-            wasLoggedInRef.current = true;
-            dispatchAuthUiEvent({ type: "close-auth-modal" });
-            if (opts?.forceWelcome || hasPendingSignup()) {
-              showSignupWelcome();
-            }
-            return;
-          }
-          await new Promise((r) => window.setTimeout(r, 400));
-        }
-        dispatchAuthUiEvent({ type: "close-auth-modal" });
-        if (opts?.forceWelcome || hasPendingSignup()) {
-          showSignupWelcome();
-        }
-      })();
-    };
-
     const onStorage = (e: StorageEvent) => {
+      if (!e.key) return;
       if (e.key === AUTH_RECOVERY_PING_KEY && e.newValue) {
         if (!isAuthHelperPage()) {
           setPasswordRecoveryOpen(true);
-          dispatchAuthUiEvent({ type: "close-auth-modal" });
+          closeAuthModals();
         }
         return;
       }
-      if (e.key !== AUTH_PING_KEY || !e.newValue) return;
-      hydrateAfterConfirm({ forceWelcome: true });
+      // pending_registration / auth ping / supabase session の変化
+      if (
+        e.key === AUTH_PING_KEY ||
+        e.key === PENDING_REGISTRATION_KEY ||
+        e.key.includes("auth-token") ||
+        e.key.includes("sb-")
+      ) {
+        void syncFromSession({
+          forceWelcome: e.key === AUTH_PING_KEY && Boolean(e.newValue),
+        });
+      }
     };
     window.addEventListener("storage", onStorage);
 
     const onAuthUi = (e: Event) => {
       const detail = (e as CustomEvent<AuthUiEventDetail>).detail;
       if (!detail || isAuthHelperPage()) return;
+      if (detail.type === "close-auth-modal") return; // Header 側で処理
+      if (detail.type === "show-welcome") {
+        closeAuthModals();
+        showSignupWelcome(detail.message);
+        return;
+      }
       if (detail.type === "signup-confirmed") {
-        hydrateAfterConfirm({ forceWelcome: true });
+        void syncFromSession({ forceWelcome: true });
       }
     };
     window.addEventListener(AUTH_UI_EVENT, onAuthUi);
@@ -195,40 +235,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (isAuthHelperPage()) return;
         if (event?.data?.type === "password-recovery") {
           setPasswordRecoveryOpen(true);
-          dispatchAuthUiEvent({ type: "close-auth-modal" });
+          closeAuthModals();
           return;
         }
         if (event?.data?.type === "signup-confirmed") {
-          hydrateAfterConfirm({ forceWelcome: true });
+          void syncFromSession({ forceWelcome: true });
         }
       };
     } catch {
       channel = null;
     }
 
-    // タブが前面に戻ったときも pending + session を再確認
-    const onVisible = () => {
-      if (document.visibilityState !== "visible" || isAuthHelperPage()) return;
-      void supabase.auth.getSession().then(({ data }) => {
-        if (!mounted) return;
-        if (data.session) {
-          setSession(data.session);
-          dispatchAuthUiEvent({ type: "close-auth-modal" });
-          if (hasPendingSignup()) showSignupWelcome();
-        }
+    const recheck = () => {
+      if (document.visibilityState === "hidden" || isAuthHelperPage()) return;
+      void syncFromSession({
+        forceWelcome: hasPendingSignup(),
       });
     };
-    document.addEventListener("visibilitychange", onVisible);
+    document.addEventListener("visibilitychange", recheck);
+    window.addEventListener("focus", recheck);
+    window.addEventListener("pageshow", recheck);
+
+    // pending 中は定期的にセッションを確認（Broadcast 取りこぼし対策）
+    const pollTimer = window.setInterval(() => {
+      if (!mounted || isAuthHelperPage()) return;
+      if (!hasPendingSignup() && !welcomeShownRef.current) return;
+      if (welcomeShownRef.current) return;
+      void syncFromSession({ forceWelcome: hasPendingSignup() });
+    }, 1500);
 
     return () => {
       mounted = false;
       sub.subscription.unsubscribe();
       window.removeEventListener("storage", onStorage);
       window.removeEventListener(AUTH_UI_EVENT, onAuthUi);
-      document.removeEventListener("visibilitychange", onVisible);
+      document.removeEventListener("visibilitychange", recheck);
+      window.removeEventListener("focus", recheck);
+      window.removeEventListener("pageshow", recheck);
+      window.clearInterval(pollTimer);
       channel?.close();
     };
-  }, [showSignupWelcome]);
+  }, [closeAuthModals, showSignupWelcome]);
 
   useEffect(() => {
     if (!isDevPersonaEnabled()) return;

@@ -14,6 +14,7 @@ import { getSupabase } from "@/lib/supabase";
 import {
   AUTH_CHANNEL,
   AUTH_UI_EVENT,
+  hasPendingSignup,
 } from "@/lib/auth-tab-sync";
 import { SITE_NAME, SITE_SHORT_NAME } from "@/lib/site";
 
@@ -33,7 +34,8 @@ export function Header() {
   const [authReady, setAuthReady] = useState(false);
   const [modalMode, setModalMode] = useState<"login" | "signup" | null>(null);
 
-  // Header 内で onAuthStateChange を監視し、表示をリアルタイム切替
+  const closeModal = () => setModalMode(null);
+
   useEffect(() => {
     const supabase = getSupabase();
     if (!supabase) {
@@ -46,12 +48,12 @@ export function Header() {
       if (!mounted) return;
       setUser(data.session?.user ?? null);
       setAuthReady(true);
+      if (data.session?.user) setModalMode(null);
     });
 
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
       setAuthReady(true);
-      // ログイン成立・セッション復元時は認証モーダルを閉じる
       if (
         session?.user &&
         (event === "SIGNED_IN" ||
@@ -67,18 +69,35 @@ export function Header() {
       const detail = (e as CustomEvent<{ type?: string }>).detail;
       if (
         detail?.type === "close-auth-modal" ||
-        detail?.type === "signup-confirmed"
+        detail?.type === "signup-confirmed" ||
+        detail?.type === "show-welcome"
       ) {
         setModalMode(null);
       }
     };
     window.addEventListener(AUTH_UI_EVENT, onAuthUi);
 
+    const onFocusClose = () => {
+      if (hasPendingSignup()) {
+        // AuthProvider の同期を待つ間も、ログイン済みなら閉じる
+        void getSupabase()
+          ?.auth.getSession()
+          .then(({ data }) => {
+            if (data.session?.user) setModalMode(null);
+          });
+      }
+    };
+    window.addEventListener("focus", onFocusClose);
+    document.addEventListener("visibilitychange", onFocusClose);
+
     let channel: BroadcastChannel | null = null;
     try {
       channel = new BroadcastChannel(AUTH_CHANNEL);
       channel.onmessage = (event) => {
-        if (event?.data?.type === "signup-confirmed") {
+        if (
+          event?.data?.type === "signup-confirmed" ||
+          event?.data?.type === "close-auth-modal"
+        ) {
           setModalMode(null);
         }
       };
@@ -90,6 +109,8 @@ export function Header() {
       mounted = false;
       sub.subscription.unsubscribe();
       window.removeEventListener(AUTH_UI_EVENT, onAuthUi);
+      window.removeEventListener("focus", onFocusClose);
+      document.removeEventListener("visibilitychange", onFocusClose);
       channel?.close();
     };
   }, []);
@@ -97,7 +118,6 @@ export function Header() {
   const effectiveUser = devUnauthenticated ? null : (user ?? authUser);
   const showAuth = authReady && ready;
 
-  // ログイン状態になったらモーダルは必ず閉じる（確認メール完了の元タブ復帰含む）
   useEffect(() => {
     if (effectiveUser) setModalMode(null);
   }, [effectiveUser]);
@@ -172,7 +192,7 @@ export function Header() {
 
       <HeaderAuthModal
         mode={modalMode}
-        onClose={() => setModalMode(null)}
+        onClose={closeModal}
         onModeChange={setModalMode}
       />
     </header>

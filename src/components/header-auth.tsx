@@ -9,7 +9,7 @@ import { BrandMark } from "@/components/brand-mark";
 import { CenterModal } from "@/components/center-modal";
 import { registerViaApi } from "@/lib/auth-api-client";
 import { translateAuthError } from "@/lib/auth-errors";
-import { markPendingSignup } from "@/lib/auth-tab-sync";
+import { AUTH_UI_EVENT, markPendingSignup } from "@/lib/auth-tab-sync";
 import { SITE_NAME } from "@/lib/site";
 
 type Mode = "login" | "signup";
@@ -29,7 +29,7 @@ export function HeaderAuthModal({
   onClose,
   onModeChange,
 }: HeaderAuthModalProps) {
-  const { signIn } = useAuth();
+  const { signIn, user } = useAuth();
   const { becomeFreeUser } = useBilling();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -38,6 +38,26 @@ export function HeaderAuthModal({
   const [info, setInfo] = useState<string | null>(null);
 
   const open = mode !== null;
+
+  // ログイン成立・歓迎イベントで強制クローズ（「確認メール送信済み」表示の取り残し防止）
+  useEffect(() => {
+    if (user) onClose();
+  }, [user, onClose]);
+
+  useEffect(() => {
+    const onAuthUi = (e: Event) => {
+      const detail = (e as CustomEvent<{ type?: string }>).detail;
+      if (
+        detail?.type === "close-auth-modal" ||
+        detail?.type === "signup-confirmed" ||
+        detail?.type === "show-welcome"
+      ) {
+        onClose();
+      }
+    };
+    window.addEventListener(AUTH_UI_EVENT, onAuthUi);
+    return () => window.removeEventListener(AUTH_UI_EVENT, onAuthUi);
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) {

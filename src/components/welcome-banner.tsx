@@ -10,10 +10,13 @@ type Props = {
   autoDismissMs?: number;
 };
 
+/**
+ * モーダル（z-50）より前面に出す固定バナー
+ */
 export function WelcomeBanner({
   message,
   onDismiss,
-  autoDismissMs = 10000,
+  autoDismissMs = 12000,
 }: Props) {
   useEffect(() => {
     if (!message || autoDismissMs <= 0) return;
@@ -25,17 +28,17 @@ export function WelcomeBanner({
   return (
     <div
       role="status"
-      className="border-b border-teal-200 bg-teal-50 px-4 py-3 dark:border-teal-900 dark:bg-teal-950/50"
+      className="fixed inset-x-0 top-0 z-[100] border-b border-teal-300 bg-teal-50 px-4 py-3 shadow-md dark:border-teal-800 dark:bg-teal-950"
     >
-      <div className="mx-auto flex max-w-5xl items-start gap-3">
-        <p className="flex-1 text-sm font-semibold text-teal-900 dark:text-teal-100">
+      <div className="mx-auto flex max-w-5xl items-start gap-3 pt-[env(safe-area-inset-top)]">
+        <p className="flex-1 text-sm font-semibold text-teal-950 dark:text-teal-50">
           {message}
         </p>
         <button
           type="button"
           aria-label="閉じる"
           onClick={onDismiss}
-          className="rounded-lg p-1 text-teal-700/70 hover:bg-teal-100 dark:text-teal-200 dark:hover:bg-teal-900"
+          className="rounded-lg p-1 text-teal-800/70 hover:bg-teal-100 dark:text-teal-100 dark:hover:bg-teal-900"
         >
           <X className="h-4 w-4" />
         </button>
