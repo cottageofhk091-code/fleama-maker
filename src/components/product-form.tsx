@@ -48,8 +48,7 @@ export function ProductForm({ onGenerated, onLoadingChange, disabled }: Props) {
     rollbackReservation,
     openPaywall,
     quota,
-    applyRemainingCredits,
-    endProTrialSession,
+    trialToken,
   } = useBilling();
   const [category, setCategory] = useState<ProductInput["category"]>(
     "家電・ガジェット",
@@ -126,16 +125,18 @@ export function ProductForm({ onGenerated, onLoadingChange, disabled }: Props) {
 
     onLoadingChange(true);
     try {
+      // 通常の生成ではクレジットを消費しない。
+      // Pro 機能は確認ダイアログで解除済み（proTrialActive / isPaidPro）のときのみ付与。
+      const unlockedPro = quota.isPaidPro || quota.proTrialActive;
       const body = {
         ...input,
-        ...(quota.isPremium
-          ? { premiumFeatures: { trendSeo: true } }
-          : {}),
-        ...(quota.isPro
+        ...(unlockedPro ? { premiumFeatures: { trendSeo: true } } : {}),
+        ...(unlockedPro
           ? {
               includeInsights: true,
               proCopyQuality: true,
-              isTrial: quota.proTrialActive || quota.canUseProTrial,
+              isTrial: quota.proTrialActive,
+              ...(trialToken ? { trialToken } : {}),
             }
           : {}),
       };
@@ -148,12 +149,6 @@ export function ProductForm({ onGenerated, onLoadingChange, disabled }: Props) {
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error || "生成に失敗しました");
-      }
-      if (typeof data.remainingCredits === "number") {
-        applyRemainingCredits(data.remainingCredits);
-        if (data.remainingCredits <= 0 && quota.proTrialActive) {
-          endProTrialSession();
-        }
       }
       const resolvedInput =
         (data.resolvedInput as ProductInput | undefined) || input;

@@ -298,7 +298,7 @@ export type ProCreditCheckResult =
  */
 export async function checkProCredits(
   userId: string | null,
-  options?: { trialToken?: string | null },
+  options?: { trialToken?: string | null; allowConsumeOnGenerate?: boolean },
 ): Promise<ProCreditCheckResult> {
   if (isDevProBypassEnabled()) {
     console.log("[Credit Check]", { userId, credits: 0, bypass: true });
@@ -347,11 +347,26 @@ export async function checkProCredits(
   }
 
   if (freeCredits >= 1) {
+    // 生成 API では自動消費しない。確認ダイアログ経由の trialToken が必要
+    // （互換: 明示 consumeOnGenerate 時のみ shouldConsume）
+    if (options?.allowConsumeOnGenerate) {
+      return {
+        ok: true,
+        paid: false,
+        shouldConsume: true,
+        freeCredits,
+      };
+    }
+    console.log("[Credit Check]", {
+      userId,
+      credits: freeCredits,
+      note: "trial_confirm_required",
+    });
     return {
-      ok: true,
-      paid: false,
-      shouldConsume: true,
+      ok: false,
       freeCredits,
+      message:
+        "Pro無料お試しは確認ダイアログで「お試し枠を使用する」を選んでからご利用ください。",
     };
   }
 

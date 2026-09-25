@@ -38,7 +38,9 @@ import {
   loadFreeCreditsFromServer,
   persistAnalyticsProfile,
 } from "@/lib/analytics-profile-client";
+import { authJsonHeaders } from "@/lib/auth-fetch";
 import { useAuth } from "@/components/auth-provider";
+import { ProTrialConfirmModal } from "@/components/billing/pro-trial-confirm-modal";
 
 type BillingContextValue = {
   ready: boolean;
@@ -64,7 +66,7 @@ type BillingContextValue = {
     name: string,
     payload: Record<string, unknown>,
   ) => { ok: true } | { ok: false; reason: "template_limit" };
-  /** Pro 1回お試しを開始（UI解放のみ。DB消費は Pro API 成功時） */
+  /** Pro 1回お試し（確認モーダル→消費→即時ロック解除） */
   startProTrial: () => Promise<boolean>;
   /** 課金 Pro またはお試しで解放できれば true */
   ensureProTrialOrPaid: () => Promise<boolean>;
@@ -74,6 +76,8 @@ type BillingContextValue = {
   refreshFreeCredits: () => Promise<void>;
   /** Pro API レスポンスの remainingCredits を即時反映 */
   applyRemainingCredits: (remainingCredits: number) => void;
+  /** お試し消費後の Pro API 用トークン */
+  trialToken: string | null;
 };
 
 const BillingContext = createContext<BillingContextValue | null>(null);
@@ -112,9 +116,13 @@ export function BillingProvider({ children }: { children: ReactNode }) {
   const [pricingOpen, setPricingOpen] = useState(false);
   const [devPersona, setDevPersonaState] = useState<DevPersona | null>(null);
   const [proTrialActive, setProTrialActive] = useState(false);
+  const [trialToken, setTrialToken] = useState<string | null>(null);
+  const [trialConfirmOpen, setTrialConfirmOpen] = useState(false);
+  const [trialConfirmLoading, setTrialConfirmLoading] = useState(false);
   const stateRef = useRef(state);
   const trialConsumingRef = useRef(false);
   const welcomeWasOpenRef = useRef(false);
+  const trialConfirmResolverRef = useRef<((ok: boolean) => void) | null>(null);
 
   const persist = useCallback((next: BillingState) => {
     const freeCredits = Math.max(0, Math.floor(next.freeCredits ?? 0));
@@ -170,9 +178,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       hasUsedProTrial: remote.hasUsedProTrial,
     });
 
-    if (remote.hasUsedProTrial) {
-      setProTrialActive(false);
-    }
+    // お試しセッション中はサーバー同期でロックを戻さない
   }, [persist, user?.id]);
 
   const applyRemainingCredits = useCallback(
@@ -181,11 +187,9 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       persist({
         ...stateRef.current,
         freeCredits: credits,
-        hasUsedProTrial: credits <= 0,
+        hasUsedProTrial: credits <= 0 || stateRef.current.hasUsedProTrial,
       });
-      if (credits <= 0) {
-        setProTrialActive(false);
-      }
+      // 確認解除済みセッションは残0でもロックを維持
     },
     [persist],
   );
@@ -230,7 +234,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
         hasUsedProTrial: remote.hasUsedProTrial,
       });
 
-      if (remote.hasUsedProTrial) setProTrialActive(false);
+      // お試しセッション中はサーバー同期でロックを戻さない
     })();
 
     return () => {
@@ -348,12 +352,67 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     [setPlanForDemo],
   );
 
+  const consumeAndUnlockTrial = useCallback(async (): Promise<boolean> => {
+    const persona = getDevPersona();
+    if (persona === "free") {
+      setProTrialActive(true);
+      persist({
+        ...stateRef.current,
+        plan: "free",
+        freeCredits: 0,
+        hasUsedProTrial: true,
+      });
+      return true;
+    }
+
+    if (trialConsumingRef.current) return proTrialActive;
+    trialConsumingRef.current = true;
+    try {
+      const headers = await authJsonHeaders();
+      if (!("Authorization" in headers) && !persona) {
+        return false;
+      }
+      const res = await fetch("/api/me/free-credits", {
+        method: "POST",
+        headers,
+      });
+      const data = (await res.json()) as {
+        success?: boolean;
+        remainingCredits?: number;
+        trialToken?: string;
+        error?: string;
+      };
+      if (!res.ok || !data.success) {
+        return false;
+      }
+
+      if (typeof data.trialToken === "string" && data.trialToken) {
+        setTrialToken(data.trialToken);
+      }
+
+      // 消費とロック解除を同時反映（ヘッダー残0 + モザイク解除）
+      setProTrialActive(true);
+      persist({
+        ...stateRef.current,
+        plan:
+          stateRef.current.plan === "visitor" ? "free" : stateRef.current.plan,
+        freeCredits: 0,
+        hasUsedProTrial: true,
+      });
+      return true;
+    } catch (error) {
+      console.error("Pro trial consume failed:", error);
+      return false;
+    } finally {
+      trialConsumingRef.current = false;
+    }
+  }, [persist, proTrialActive]);
+
   const startProTrial = useCallback(async () => {
     const persona = getDevPersona();
     const authenticated =
       Boolean(user) || persona === "free" || persona === "paid";
 
-    // 開始直前に DB 最新を取りにいく（localStorage 汚染対策）
     if (user?.id && persona !== "free") {
       await refreshFreeCredits();
     }
@@ -365,8 +424,8 @@ export function BillingProvider({ children }: { children: ReactNode }) {
 
     if (snap.isPaidPro) return true;
     if (proTrialActive) return true;
-    if (snap.freeCredits <= 0 || snap.hasUsedProTrial) return false;
     if (!authenticated) return false;
+    if (snap.freeCredits <= 0 || snap.hasUsedProTrial) return false;
 
     if (stateRef.current.plan === "visitor" && !persona) {
       persist({
@@ -376,16 +435,28 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       });
     }
 
-    if (trialConsumingRef.current) return true;
-    trialConsumingRef.current = true;
-    try {
-      // UI だけ解放。DB 消費は Pro API 成功時
-      setProTrialActive(true);
-      return true;
-    } finally {
-      trialConsumingRef.current = false;
-    }
+    // 確認モーダルを表示し、ユーザー確定まで待つ
+    return await new Promise<boolean>((resolve) => {
+      trialConfirmResolverRef.current = resolve;
+      setTrialConfirmOpen(true);
+    });
   }, [persist, proTrialActive, refreshFreeCredits, user]);
+
+  const handleTrialConfirm = useCallback(async () => {
+    setTrialConfirmLoading(true);
+    const ok = await consumeAndUnlockTrial();
+    setTrialConfirmLoading(false);
+    setTrialConfirmOpen(false);
+    trialConfirmResolverRef.current?.(ok);
+    trialConfirmResolverRef.current = null;
+  }, [consumeAndUnlockTrial]);
+
+  const handleTrialCancel = useCallback(() => {
+    if (trialConfirmLoading) return;
+    setTrialConfirmOpen(false);
+    trialConfirmResolverRef.current?.(false);
+    trialConfirmResolverRef.current = null;
+  }, [trialConfirmLoading]);
 
   const ensureProTrialOrPaid = useCallback(async () => {
     const persona = getDevPersona();
@@ -403,8 +474,8 @@ export function BillingProvider({ children }: { children: ReactNode }) {
   }, [proTrialActive, startProTrial, user]);
 
   const endProTrialSession = useCallback(() => {
-    // 残枠は戻さない。セッション解放だけ終了してモザイク適用
     setProTrialActive(false);
+    setTrialToken(null);
     persist({
       ...stateRef.current,
       freeCredits: 0,
@@ -429,6 +500,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
         persist(upgradeToPro(stateRef.current));
         setPaywallOpen(false);
         setProTrialActive(false);
+        setTrialToken(null);
         persistAnalyticsProfile({ plan_type: PROFILE_PLAN.paid, free_credits: 0 });
       },
       becomeFreeUser: () => {
@@ -443,7 +515,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
           hasUsedProTrial: freeCredits <= 0,
         });
         setProTrialActive(false);
-        // DB をローカル推測で 0 上書きしない（サーバー同期に任せる）
+        setTrialToken(null);
         if (freeCredits >= 1) {
           persistAnalyticsProfile({
             plan_type: PROFILE_PLAN.free,
@@ -478,6 +550,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       endProTrialSession,
       refreshFreeCredits,
       applyRemainingCredits,
+      trialToken,
     }),
     [
       ready,
@@ -500,11 +573,20 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       endProTrialSession,
       refreshFreeCredits,
       applyRemainingCredits,
+      trialToken,
     ],
   );
 
   return (
-    <BillingContext.Provider value={value}>{children}</BillingContext.Provider>
+    <BillingContext.Provider value={value}>
+      {children}
+      <ProTrialConfirmModal
+        open={trialConfirmOpen}
+        loading={trialConfirmLoading}
+        onConfirm={() => void handleTrialConfirm()}
+        onCancel={handleTrialCancel}
+      />
+    </BillingContext.Provider>
   );
 }
 

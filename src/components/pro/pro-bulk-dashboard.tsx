@@ -122,8 +122,7 @@ export function ProBulkDashboard() {
     quota,
     openPricing,
     ensureProTrialOrPaid,
-    endProTrialSession,
-    applyRemainingCredits,
+    trialToken,
   } = useBilling();
   const locked = !quota.isPro;
   const [rows, setRows] = useState<InputRow[]>(SAMPLE_ROWS);
@@ -170,7 +169,6 @@ export function ProBulkDashboard() {
   }
 
   async function startBulk() {
-    const wasTrialSession = quota.proTrialActive || quota.canUseProTrial;
     if (locked) {
       const unlocked = await ensureProTrialOrPaid();
       if (!unlocked) {
@@ -194,8 +192,9 @@ export function ProBulkDashboard() {
     }));
     setCards(initial);
     setRunning(true);
-    trialRunRef.current = wasTrialSession || quota.proTrialActive;
-    trialTokenRef.current = null;
+    trialRunRef.current = quota.proTrialActive;
+    // 確認ダイアログで既に消費済みの trialToken を使う（生成では再消費しない）
+    trialTokenRef.current = trialToken;
 
     const concurrency = 3;
     let cursor = 0;
@@ -240,9 +239,6 @@ export function ProBulkDashboard() {
         window.clearInterval(progressTimer);
         if (!res.ok) throw new Error(data.error || "生成失敗");
 
-        if (typeof data.remainingCredits === "number") {
-          applyRemainingCredits(data.remainingCredits);
-        }
         if (typeof data.trialToken === "string" && data.trialToken) {
           trialTokenRef.current = data.trialToken;
         }
@@ -282,12 +278,6 @@ export function ProBulkDashboard() {
       }
     }
 
-    // お試しは先頭1件でクレジット消費→trialToken取得後に並列
-    if (isTrialRun && initial.length > 0) {
-      await runOne(0, initial[0]);
-      cursor = 1;
-    }
-
     async function worker() {
       while (cursor < initial.length) {
         const index = cursor;
@@ -298,21 +288,12 @@ export function ProBulkDashboard() {
 
     await Promise.all(
       Array.from(
-        {
-          length: Math.min(
-            concurrency,
-            Math.max(0, initial.length - cursor),
-          ),
-        },
+        { length: Math.min(concurrency, initial.length) },
         () => worker(),
       ),
     );
     setRunning(false);
-    if (trialRunRef.current) {
-      endProTrialSession();
-      trialRunRef.current = false;
-      trialTokenRef.current = null;
-    }
+    trialRunRef.current = false;
   }
 
   async function copyAll() {
