@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
 import { logAnalysisEvent } from "@/lib/analytics";
+import { getRequestAuthUser } from "@/lib/auth-request";
+import {
+  checkProCredits,
+  consumeFreeCredit,
+  PRO_TRIAL_EXHAUSTED_MESSAGE,
+} from "@/lib/billing/free-credits-server";
 import { generateListing } from "@/lib/gemini";
 import { sendGA4Event } from "@/lib/ga4-mp";
 import { computeSeoInsights } from "@/lib/seo-insights";
@@ -50,6 +56,18 @@ function isProductInput(body: unknown): body is ProductInput {
   });
 }
 
+function wantsProFeatures(body: {
+  premiumFeatures?: { trendSeo?: boolean };
+  includeInsights?: boolean;
+  proCopyQuality?: boolean;
+}): boolean {
+  return Boolean(
+    body.includeInsights ||
+      body.proCopyQuality ||
+      body.premiumFeatures?.trendSeo,
+  );
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ProductInput & {
@@ -57,6 +75,8 @@ export async function POST(request: Request) {
       includeInsights?: boolean;
       proCopyQuality?: boolean;
       isTrial?: boolean;
+      /** お試し消費後の一括継続用トークン */
+      trialToken?: string;
     };
     if (!isProductInput(body)) {
       return NextResponse.json(
@@ -85,10 +105,54 @@ export async function POST(request: Request) {
       notes: body.notes?.trim() || undefined,
     };
 
+    const proRequested = wantsProFeatures(body);
+    let remainingCredits: number | undefined;
+    let shouldConsume = false;
+    let authUserId: string | null = null;
+    let trialTokenOut: string | undefined;
+
+    if (proRequested) {
+      const authUser = await getRequestAuthUser(request);
+      authUserId = authUser?.id ?? null;
+      const creditCheck = await checkProCredits(authUserId, {
+        trialToken: body.trialToken,
+      });
+
+      if (!creditCheck.ok) {
+        return NextResponse.json(
+          {
+            error: creditCheck.message || PRO_TRIAL_EXHAUSTED_MESSAGE,
+            success: false,
+            remainingCredits: 0,
+          },
+          { status: 403 },
+        );
+      }
+
+      shouldConsume = creditCheck.shouldConsume;
+      remainingCredits = creditCheck.freeCredits;
+    }
+
     const result = await generateListing(input, {
       trendSeo: Boolean(body.premiumFeatures?.trendSeo),
       proCopyQuality: Boolean(body.proCopyQuality || body.includeInsights),
     });
+
+    if (proRequested && shouldConsume && authUserId) {
+      const consumed = await consumeFreeCredit(authUserId);
+      if (!consumed.success) {
+        return NextResponse.json(
+          {
+            error: PRO_TRIAL_EXHAUSTED_MESSAGE,
+            success: false,
+            remainingCredits: 0,
+          },
+          { status: 403 },
+        );
+      }
+      remainingCredits = 0;
+      trialTokenOut = consumed.trialToken;
+    }
 
     try {
       await sendGA4Event("item_analyzed", {
@@ -101,34 +165,44 @@ export async function POST(request: Request) {
     try {
       const { userId } = await getOrCreateUserId();
       void logAnalysisEvent({
-        user_id: userId,
+        user_id: authUserId || userId,
         metadata: {
           category: input.category,
           brand: input.brand,
           include_insights: Boolean(body.includeInsights),
           source: "generate",
           is_trial: Boolean(body.isTrial),
+          remaining_credits:
+            remainingCredits === undefined ? null : remainingCredits,
         },
       });
     } catch (analyticsError) {
       console.error("Analytics event log error:", analyticsError);
     }
 
+    const payload: Record<string, unknown> = {
+      ...result,
+      resolvedInput: input,
+      success: true,
+    };
+    if (remainingCredits !== undefined) {
+      payload.remainingCredits = remainingCredits;
+    }
+    if (trialTokenOut) {
+      payload.trialToken = trialTokenOut;
+    }
     if (body.includeInsights) {
-      return NextResponse.json({
-        ...result,
-        insights: computeSeoInsights(input, result),
-        resolvedInput: input,
-      });
+      payload.insights = computeSeoInsights(input, result);
     }
 
-    return NextResponse.json({ ...result, resolvedInput: input });
+    return NextResponse.json(payload);
   } catch (error) {
     Sentry.captureException(error);
     return NextResponse.json(
       {
         error:
           "生成中にエラーが発生しました。しばらくしてから再度お試しください。",
+        success: false,
       },
       { status: 500 },
     );

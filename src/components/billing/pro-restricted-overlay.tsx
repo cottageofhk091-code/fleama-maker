@@ -60,7 +60,9 @@ export function ProRestrictedOverlay({
     const ok = await startProTrial();
     setLoading(false);
     if (!ok) {
-      setError("お試し権がありません。Proプランをご検討ください。");
+      setError(
+        "Pro機能の無料試用枠は終了しました。有料プランをご利用ください",
+      );
       openPricing();
     }
   }

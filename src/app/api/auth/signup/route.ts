@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { APP_ID, saveUserProfile } from "@/lib/analytics";
-import { PROFILE_PLAN } from "@/lib/billing";
+import { APP_ID } from "@/lib/analytics";
 import {
   buildAppAuthActionUrl,
   forceActionLinkRedirectTo,
   getAuthCallbackUrl,
 } from "@/lib/auth-redirect";
+import { ensureSignupProfile } from "@/lib/billing/free-credits-server";
 import { sendFurimaAuthEmail } from "@/lib/furima-auth-email";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
@@ -19,6 +19,7 @@ export const runtime = "nodejs";
  * 2) admin.generateLink（リンクのみ取得・メール非送信）
  * 3) hashed_token からフリマリスト /auth/confirmed 直リンクを組み立て Resend 送信
  *    （共有 Supabase の Site URL＝他アプリへの誤リダイレクトを回避）
+ * 4) profiles.free_credits=1 を Service Role で確実に作成
  */
 export async function POST(request: Request) {
   try {
@@ -149,12 +150,7 @@ export async function POST(request: Request) {
 
     const userId = created.user?.id;
     if (userId) {
-      await saveUserProfile({
-        user_id: userId,
-        plan_type: PROFILE_PLAN.free,
-        free_credits: 1,
-        has_used_pro_trial: false,
-      });
+      await ensureSignupProfile(userId);
     }
 
     return NextResponse.json({ ok: true });

@@ -215,7 +215,6 @@ export async function saveUserProfile(
 
   const row: Record<string, string | boolean | number | null> = {
     id: params.user_id,
-    app_id: APP_ID,
   };
   if (params.plan_type !== undefined) {
     row.plan_type = params.plan_type;
@@ -242,6 +241,14 @@ export async function saveUserProfile(
 
   if (error) {
     console.error("Supabase profiles upsert error:", error);
+    if (
+      /free_credits/i.test(error.message || "") ||
+      error.code === "PGRST204"
+    ) {
+      console.error(
+        "[Pro Credit Check Error]: profiles.free_credits 列が見つかりません。マイグレーションを適用してください。",
+      );
+    }
   }
 }
 
@@ -278,6 +285,7 @@ export async function fetchFreeCredits(
     has_used_pro_trial?: boolean | null;
   };
   const usedFlag = Boolean(row.has_used_pro_trial);
+  // NULL は初回のみ 1（消費済みフラグがあれば 0）
   let freeCredits =
     typeof row.free_credits === "number" && !Number.isNaN(row.free_credits)
       ? Math.max(0, Math.floor(row.free_credits))

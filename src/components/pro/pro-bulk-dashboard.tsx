@@ -12,6 +12,7 @@ import {
   Wand2,
 } from "lucide-react";
 import { PRO_BULK_MAX_ITEMS } from "@/lib/billing";
+import { authJsonHeaders } from "@/lib/auth-fetch";
 import {
   rowsToDraftItems,
   validateBulkInputs,
@@ -117,8 +118,13 @@ const SAMPLE_ROWS: InputRow[] = [
 ];
 
 export function ProBulkDashboard() {
-  const { quota, openPricing, ensureProTrialOrPaid, endProTrialSession } =
-    useBilling();
+  const {
+    quota,
+    openPricing,
+    ensureProTrialOrPaid,
+    endProTrialSession,
+    applyRemainingCredits,
+  } = useBilling();
   const locked = !quota.isPro;
   const [rows, setRows] = useState<InputRow[]>(SAMPLE_ROWS);
   const [cards, setCards] = useState<BulkCard[]>([]);
@@ -127,6 +133,7 @@ export function ProBulkDashboard() {
   const [formError, setFormError] = useState<string | null>(null);
   const [reviewIndex, setReviewIndex] = useState<number | null>(null);
   const trialRunRef = useRef(false);
+  const trialTokenRef = useRef<string | null>(null);
 
   const overallProgress = useMemo(() => {
     if (cards.length === 0) return 0;
@@ -188,95 +195,123 @@ export function ProBulkDashboard() {
     setCards(initial);
     setRunning(true);
     trialRunRef.current = wasTrialSession || quota.proTrialActive;
+    trialTokenRef.current = null;
 
     const concurrency = 3;
     let cursor = 0;
     const isTrialRun = trialRunRef.current;
+    const headers = await authJsonHeaders();
+
+    async function runOne(index: number, card: BulkCard) {
+      if (!card.input) return;
+
+      setCards((prev) =>
+        prev.map((c, i) =>
+          i === index ? { ...c, status: "running", progress: 15 } : c,
+        ),
+      );
+
+      const progressTimer = window.setInterval(() => {
+        setCards((prev) =>
+          prev.map((c, i) =>
+            i === index && c.status === "running"
+              ? { ...c, progress: Math.min(85, c.progress + 8) }
+              : c,
+          ),
+        );
+      }, 280);
+
+      try {
+        const res = await fetch("/api/generate", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            ...card.input,
+            premiumFeatures: { trendSeo: true },
+            includeInsights: true,
+            proCopyQuality: true,
+            isTrial: isTrialRun,
+            ...(trialTokenRef.current
+              ? { trialToken: trialTokenRef.current }
+              : {}),
+          }),
+        });
+        const data = await res.json();
+        window.clearInterval(progressTimer);
+        if (!res.ok) throw new Error(data.error || "生成失敗");
+
+        if (typeof data.remainingCredits === "number") {
+          applyRemainingCredits(data.remainingCredits);
+        }
+        if (typeof data.trialToken === "string" && data.trialToken) {
+          trialTokenRef.current = data.trialToken;
+        }
+
+        const { insights, ...result } = data as GenerateResult & {
+          insights: SeoInsights;
+        };
+
+        setCards((prev) =>
+          prev.map((c, i) =>
+            i === index
+              ? {
+                  ...c,
+                  status: "done",
+                  progress: 100,
+                  result,
+                  insights,
+                }
+              : c,
+          ),
+        );
+      } catch (err) {
+        window.clearInterval(progressTimer);
+        setCards((prev) =>
+          prev.map((c, i) =>
+            i === index
+              ? {
+                  ...c,
+                  status: "error",
+                  progress: 100,
+                  error:
+                    err instanceof Error ? err.message : "生成に失敗しました",
+                }
+              : c,
+          ),
+        );
+      }
+    }
+
+    // お試しは先頭1件でクレジット消費→trialToken取得後に並列
+    if (isTrialRun && initial.length > 0) {
+      await runOne(0, initial[0]);
+      cursor = 1;
+    }
 
     async function worker() {
       while (cursor < initial.length) {
         const index = cursor;
         cursor += 1;
-        const card = initial[index];
-        if (!card.input) continue;
-
-        setCards((prev) =>
-          prev.map((c, i) =>
-            i === index ? { ...c, status: "running", progress: 15 } : c,
-          ),
-        );
-
-        const progressTimer = window.setInterval(() => {
-          setCards((prev) =>
-            prev.map((c, i) =>
-              i === index && c.status === "running"
-                ? { ...c, progress: Math.min(85, c.progress + 8) }
-                : c,
-            ),
-          );
-        }, 280);
-
-        try {
-          const res = await fetch("/api/generate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              ...card.input,
-              premiumFeatures: { trendSeo: true },
-              includeInsights: true,
-              proCopyQuality: true,
-              isTrial: isTrialRun,
-            }),
-          });
-          const data = await res.json();
-          window.clearInterval(progressTimer);
-          if (!res.ok) throw new Error(data.error || "生成失敗");
-
-          const { insights, ...result } = data as GenerateResult & {
-            insights: SeoInsights;
-          };
-
-          setCards((prev) =>
-            prev.map((c, i) =>
-              i === index
-                ? {
-                    ...c,
-                    status: "done",
-                    progress: 100,
-                    result,
-                    insights,
-                  }
-                : c,
-            ),
-          );
-        } catch (err) {
-          window.clearInterval(progressTimer);
-          setCards((prev) =>
-            prev.map((c, i) =>
-              i === index
-                ? {
-                    ...c,
-                    status: "error",
-                    progress: 100,
-                    error:
-                      err instanceof Error ? err.message : "生成に失敗しました",
-                  }
-                : c,
-            ),
-          );
-        }
+        await runOne(index, initial[index]);
       }
     }
 
     await Promise.all(
-      Array.from({ length: Math.min(concurrency, initial.length) }, () =>
-        worker(),
+      Array.from(
+        {
+          length: Math.min(
+            concurrency,
+            Math.max(0, initial.length - cursor),
+          ),
+        },
+        () => worker(),
       ),
     );
     setRunning(false);
     if (trialRunRef.current) {
       endProTrialSession();
       trialRunRef.current = false;
+      trialTokenRef.current = null;
     }
   }
 

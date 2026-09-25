@@ -11,6 +11,7 @@ import {
 } from "@/lib/types";
 import type { GenerateResult, ProductInput } from "@/lib/types";
 import { CONDITION_BUTTON_LABELS } from "@/lib/condition";
+import { authJsonHeaders } from "@/lib/auth-fetch";
 import { useBilling } from "@/components/billing/billing-provider";
 
 type Props = {
@@ -42,8 +43,14 @@ function RequiredMark() {
 }
 
 export function ProductForm({ onGenerated, onLoadingChange, disabled }: Props) {
-  const { reserveGeneration, rollbackReservation, openPaywall, quota } =
-    useBilling();
+  const {
+    reserveGeneration,
+    rollbackReservation,
+    openPaywall,
+    quota,
+    applyRemainingCredits,
+    endProTrialSession,
+  } = useBilling();
   const [category, setCategory] = useState<ProductInput["category"]>(
     "家電・ガジェット",
   );
@@ -125,18 +132,28 @@ export function ProductForm({ onGenerated, onLoadingChange, disabled }: Props) {
           ? { premiumFeatures: { trendSeo: true } }
           : {}),
         ...(quota.isPro
-          ? { includeInsights: true, proCopyQuality: true }
+          ? {
+              includeInsights: true,
+              proCopyQuality: true,
+              isTrial: quota.proTrialActive || quota.canUseProTrial,
+            }
           : {}),
       };
 
       const res = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await authJsonHeaders(),
         body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error || "生成に失敗しました");
+      }
+      if (typeof data.remainingCredits === "number") {
+        applyRemainingCredits(data.remainingCredits);
+        if (data.remainingCredits <= 0 && quota.proTrialActive) {
+          endProTrialSession();
+        }
       }
       const resolvedInput =
         (data.resolvedInput as ProductInput | undefined) || input;

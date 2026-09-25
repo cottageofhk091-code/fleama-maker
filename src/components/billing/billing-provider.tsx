@@ -35,7 +35,6 @@ import {
   type DevPersona,
 } from "@/lib/billing/dev-persona";
 import {
-  consumeProTrialRemote,
   loadFreeCreditsFromServer,
   persistAnalyticsProfile,
 } from "@/lib/analytics-profile-client";
@@ -65,12 +64,16 @@ type BillingContextValue = {
     name: string,
     payload: Record<string, unknown>,
   ) => { ok: true } | { ok: false; reason: "template_limit" };
-  /** Pro 1回お試しを開始（解放 + DB消費） */
+  /** Pro 1回お試しを開始（UI解放のみ。DB消費は Pro API 成功時） */
   startProTrial: () => Promise<boolean>;
   /** 課金 Pro またはお試しで解放できれば true */
   ensureProTrialOrPaid: () => Promise<boolean>;
   /** お試しセッションを終了（次回からモザイク。残枠は戻さない） */
   endProTrialSession: () => void;
+  /** DB の free_credits を再取得して反映 */
+  refreshFreeCredits: () => Promise<void>;
+  /** Pro API レスポンスの remainingCredits を即時反映 */
+  applyRemainingCredits: (remainingCredits: number) => void;
 };
 
 const BillingContext = createContext<BillingContextValue | null>(null);
@@ -100,7 +103,7 @@ function applyDevPersonaToState(
 }
 
 export function BillingProvider({ children }: { children: ReactNode }) {
-  const { user, ready: authReady } = useAuth();
+  const { user, ready: authReady, welcomeOpen } = useAuth();
   const [ready, setReady] = useState(false);
   const [state, setState] = useState<BillingState>(() =>
     createDefaultBillingState("visitor"),
@@ -111,6 +114,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
   const [proTrialActive, setProTrialActive] = useState(false);
   const stateRef = useRef(state);
   const trialConsumingRef = useRef(false);
+  const welcomeWasOpenRef = useRef(false);
 
   const persist = useCallback((next: BillingState) => {
     const freeCredits = Math.max(0, Math.floor(next.freeCredits ?? 0));
@@ -148,6 +152,44 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     saveBillingState(state);
   }, [state, ready]);
 
+  const refreshFreeCredits = useCallback(async () => {
+    if (!user?.id) return;
+    const remote = await loadFreeCreditsFromServer(user.id);
+    if (!remote) return;
+
+    const current = stateRef.current;
+    const nextPlan =
+      current.plan === "visitor" || current.plan === "free"
+        ? ("free" as const)
+        : current.plan;
+
+    persist({
+      ...current,
+      plan: nextPlan === "premium" ? "pro" : nextPlan,
+      freeCredits: remote.freeCredits,
+      hasUsedProTrial: remote.hasUsedProTrial,
+    });
+
+    if (remote.hasUsedProTrial) {
+      setProTrialActive(false);
+    }
+  }, [persist, user?.id]);
+
+  const applyRemainingCredits = useCallback(
+    (remainingCredits: number) => {
+      const credits = Math.max(0, Math.floor(remainingCredits));
+      persist({
+        ...stateRef.current,
+        freeCredits: credits,
+        hasUsedProTrial: credits <= 0,
+      });
+      if (credits <= 0) {
+        setProTrialActive(false);
+      }
+    },
+    [persist],
+  );
+
   // ログイン済みなら visitor → free へ昇格し、free_credits をサーバー同期
   useEffect(() => {
     if (!ready || !authReady) return;
@@ -167,39 +209,46 @@ export function BillingProvider({ children }: { children: ReactNode }) {
           ? ("free" as const)
           : current.plan;
 
-      // DB を正とする（再ログインで「残り1回」に戻さない）
-      const freeCredits =
-        remote == null
-          ? current.freeCredits
-          : remote.freeCredits;
-      const hasUsed =
-        remote == null
-          ? current.freeCredits <= 0 || current.hasUsedProTrial
-          : remote.hasUsedProTrial;
+      if (remote == null) {
+        // DB 取得失敗時はローカルの「消費済み」でサーバを上書きしない
+        if (current.plan === "visitor") {
+          persist({
+            ...current,
+            plan: "free",
+            // 新規ログイン直後は残り1を優先（汚染 localStorage を捨てる）
+            freeCredits: 1,
+            hasUsedProTrial: false,
+          });
+        }
+        return;
+      }
 
       persist({
         ...current,
         plan: nextPlan === "premium" ? "pro" : nextPlan,
-        freeCredits: hasUsed ? 0 : freeCredits,
-        hasUsedProTrial: hasUsed,
+        freeCredits: remote.freeCredits,
+        hasUsedProTrial: remote.hasUsedProTrial,
       });
 
-      if (current.plan === "visitor") {
-        persistAnalyticsProfile({
-          user_id: user.id,
-          plan_type: PROFILE_PLAN.free,
-          free_credits: hasUsed ? 0 : freeCredits,
-          has_used_pro_trial: hasUsed,
-        });
-      }
-
-      if (hasUsed) setProTrialActive(false);
+      if (remote.hasUsedProTrial) setProTrialActive(false);
     })();
 
     return () => {
       cancelled = true;
     };
   }, [ready, authReady, user?.id, persist]);
+
+  // 認証完了モーダルを閉じたタイミングで DB 最新値を再取得
+  useEffect(() => {
+    if (welcomeOpen) {
+      welcomeWasOpenRef.current = true;
+      return;
+    }
+    if (welcomeWasOpenRef.current && user?.id) {
+      welcomeWasOpenRef.current = false;
+      void refreshFreeCredits();
+    }
+  }, [welcomeOpen, user?.id, refreshFreeCredits]);
 
   const effectiveState = useMemo(
     () => applyDevPersonaToState(state, devPersona),
@@ -303,6 +352,12 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     const persona = getDevPersona();
     const authenticated =
       Boolean(user) || persona === "free" || persona === "paid";
+
+    // 開始直前に DB 最新を取りにいく（localStorage 汚染対策）
+    if (user?.id && persona !== "free") {
+      await refreshFreeCredits();
+    }
+
     const snap = getQuotaSnapshot(
       applyDevPersonaToState(stateRef.current, persona),
       { proTrialActive, isAuthenticated: authenticated },
@@ -316,29 +371,21 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     if (stateRef.current.plan === "visitor" && !persona) {
       persist({
         ...registerAsFree(stateRef.current),
+        freeCredits: Math.max(1, stateRef.current.freeCredits),
+        hasUsedProTrial: false,
       });
     }
 
     if (trialConsumingRef.current) return true;
     trialConsumingRef.current = true;
     try {
-      // 先にローカルを 0 にして再実行時も即座にモザイク
+      // UI だけ解放。DB 消費は Pro API 成功時
       setProTrialActive(true);
-      persist({
-        ...stateRef.current,
-        plan:
-          stateRef.current.plan === "visitor" ? "free" : stateRef.current.plan,
-        freeCredits: 0,
-        hasUsedProTrial: true,
-      });
-      if (persona !== "free") {
-        await consumeProTrialRemote(user?.id);
-      }
       return true;
     } finally {
       trialConsumingRef.current = false;
     }
-  }, [persist, proTrialActive, user]);
+  }, [persist, proTrialActive, refreshFreeCredits, user]);
 
   const ensureProTrialOrPaid = useCallback(async () => {
     const persona = getDevPersona();
@@ -385,7 +432,6 @@ export function BillingProvider({ children }: { children: ReactNode }) {
         persistAnalyticsProfile({ plan_type: PROFILE_PLAN.paid, free_credits: 0 });
       },
       becomeFreeUser: () => {
-        // 新規登録直後: まだ DB 同期前なら 1 回付与。既に 0 なら維持
         const current = stateRef.current;
         const freeCredits =
           current.hasUsedProTrial || current.freeCredits <= 0
@@ -397,11 +443,14 @@ export function BillingProvider({ children }: { children: ReactNode }) {
           hasUsedProTrial: freeCredits <= 0,
         });
         setProTrialActive(false);
-        persistAnalyticsProfile({
-          plan_type: PROFILE_PLAN.free,
-          free_credits: freeCredits,
-          has_used_pro_trial: freeCredits <= 0,
-        });
+        // DB をローカル推測で 0 上書きしない（サーバー同期に任せる）
+        if (freeCredits >= 1) {
+          persistAnalyticsProfile({
+            plan_type: PROFILE_PLAN.free,
+            free_credits: freeCredits,
+            has_used_pro_trial: false,
+          });
+        }
       },
       setPlanForDemo,
       devPersona,
@@ -427,6 +476,8 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       startProTrial,
       ensureProTrialOrPaid,
       endProTrialSession,
+      refreshFreeCredits,
+      applyRemainingCredits,
     }),
     [
       ready,
@@ -447,6 +498,8 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       startProTrial,
       ensureProTrialOrPaid,
       endProTrialSession,
+      refreshFreeCredits,
+      applyRemainingCredits,
     ],
   );
 

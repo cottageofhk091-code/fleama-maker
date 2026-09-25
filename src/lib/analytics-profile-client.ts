@@ -1,8 +1,8 @@
 "use client";
 
+import { authJsonHeaders } from "@/lib/auth-fetch";
 import { resolveAnalyticsUserId } from "@/lib/analytics-session";
 import {
-  fetchFreeCredits,
   logAnalysisEvent,
   saveUserProfile,
   type UserProfileInput,
@@ -30,7 +30,10 @@ export function persistAnalyticsProfile(
   })();
 }
 
-/** Pro お試し消費を profiles.free_credits=0 へ反映 */
+/**
+ * Pro お試し消費は /api/generate 成功時にサーバーが行う。
+ * ここはローカル反映のフォールバック用（明示的に 0 を書く）
+ */
 export async function consumeProTrialRemote(userId?: string): Promise<void> {
   try {
     const user_id = userId?.trim() || (await resolveAnalyticsUserId());
@@ -52,14 +55,33 @@ export async function consumeProTrialRemote(userId?: string): Promise<void> {
   }
 }
 
-/** ログイン後にサーバー上の free_credits を取得 */
+/** ログイン後にサーバー上の free_credits を取得（Service Role API） */
 export async function loadFreeCreditsFromServer(
-  userId?: string,
+  _userId?: string,
 ): Promise<{ freeCredits: number; hasUsedProTrial: boolean } | null> {
   try {
-    const user_id = userId?.trim() || (await resolveAnalyticsUserId());
-    if (!user_id) return null;
-    return await fetchFreeCredits(user_id);
+    const headers = await authJsonHeaders();
+    if (!("Authorization" in headers)) {
+      return null;
+    }
+    const res = await fetch("/api/me/free-credits", {
+      method: "GET",
+      headers,
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      console.error("Free credits fetch HTTP error:", res.status);
+      return null;
+    }
+    const data = (await res.json()) as {
+      freeCredits?: number;
+      hasUsedProTrial?: boolean;
+    };
+    const freeCredits = Math.max(0, Math.floor(data.freeCredits ?? 0));
+    return {
+      freeCredits,
+      hasUsedProTrial: Boolean(data.hasUsedProTrial) || freeCredits <= 0,
+    };
   } catch (error) {
     console.error("Free credits fetch error:", error);
     return null;
