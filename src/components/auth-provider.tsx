@@ -16,6 +16,10 @@ import { RegistrationFocusSync } from "@/components/registration-focus-sync";
 import { WelcomeModal } from "@/components/welcome-modal";
 import { translateAuthError } from "@/lib/auth-errors";
 import {
+  consumeRegisteredQueryParam,
+  hasRegisteredQuery,
+} from "@/lib/auth-redirect";
+import {
   AUTH_CHANNEL,
   AUTH_PING_KEY,
   AUTH_RECOVERY_PING_KEY,
@@ -25,8 +29,6 @@ import {
   clearPendingSignup,
   dispatchAuthUiEvent,
   hasPendingRecovery,
-  hasPendingSignup,
-  hasSignupWelcomeShown,
   isAuthHelperPage,
   markSignupWelcomeShown,
 } from "@/lib/auth-tab-sync";
@@ -65,8 +67,8 @@ const AuthContext = createContext<AuthContextValue | null>(null);
  * resetPasswordForEmail では送らない。
  * UI は /api/auth/signup・/api/auth/forgot-password（Resend）を直接呼ぶこと。
  *
- * メール確認後の元タブ復帰は RegistrationFocusSync が担当
- * （focus / visibilitychange で getSession + pending_registration 判定）。
+ * 会員登録ありがとうダイアログは URL の ?registered=true で表示する
+ * （メール確認後に /?registered=true へリダイレクトされる）。
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
@@ -81,83 +83,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     dispatchAuthUiEvent({ type: "close-auth-modal" });
   }, []);
 
-  const showSignupWelcome = useCallback(
-    (_message?: string) => {
-      closeAuthModals();
+  /**
+   * ?registered=true があれば歓迎モーダルを開き、直後にクエリを除去する。
+   * 通常ログイン・F5（クエリ無し）では絶対に出ない。
+   */
+  const showWelcomeFromRegisteredQuery = useCallback(() => {
+    if (welcomeShownRef.current) return false;
+    if (isAuthHelperPage()) return false;
+    if (!hasRegisteredQuery()) return false;
 
-      if (welcomeShownRef.current) {
-        clearPendingSignup();
-        return;
-      }
-
-      // 表示条件: pending_registration=true、または確認タブからの直近 ping
-      let pingFresh = false;
-      try {
-        const ping = localStorage.getItem(AUTH_PING_KEY);
-        if (ping) {
-          const parsed = JSON.parse(ping) as { at?: number };
-          pingFresh = Boolean(
-            parsed.at && Date.now() - parsed.at < 5 * 60 * 1000,
-          );
-        }
-      } catch {
-        pingFresh = false;
-      }
-      if (!hasPendingSignup() && !pingFresh) {
-        return;
-      }
-
-      void (async () => {
-        if (welcomeShownRef.current) return;
-
-        const { data } = (await getSupabase()?.auth.getSession()) ?? {
-          data: { session: null },
-        };
-        const uid = data.session?.user?.id ?? session?.user?.id ?? null;
-
-        // ログインセッションがまだ無い場合は次の focus/SIGNED_IN に任せる
-        if (!uid) return;
-
-        if (hasSignupWelcomeShown(uid)) {
-          clearPendingSignup();
-          try {
-            localStorage.removeItem(AUTH_PING_KEY);
-          } catch {
-            // ignore
-          }
-          return;
-        }
-
-        // まだ pending / ping が有効か再確認
-        let stillPing = false;
-        try {
-          const ping = localStorage.getItem(AUTH_PING_KEY);
-          if (ping) {
-            const parsed = JSON.parse(ping) as { at?: number };
-            stillPing = Boolean(
-              parsed.at && Date.now() - parsed.at < 5 * 60 * 1000,
-            );
-          }
-        } catch {
-          stillPing = false;
-        }
-        if (!hasPendingSignup() && !stillPing) return;
-
-        welcomeShownRef.current = true;
-        setWelcomeOpen(true);
-        markSignupWelcomeShown(uid);
-        clearPendingSignup();
-        try {
-          localStorage.removeItem(AUTH_PING_KEY);
-        } catch {
-          // ignore
-        }
-        window.setTimeout(() => closeAuthModals(), 0);
-        window.setTimeout(() => closeAuthModals(), 250);
-      })();
-    },
-    [closeAuthModals, session?.user?.id],
-  );
+    welcomeShownRef.current = true;
+    closeAuthModals();
+    setWelcomeOpen(true);
+    // 表示直後に URL から除去 → リロードで再表示されない
+    consumeRegisteredQueryParam();
+    clearPendingSignup();
+    try {
+      localStorage.removeItem(AUTH_PING_KEY);
+    } catch {
+      // ignore
+    }
+    void getSupabase()
+      ?.auth.getSession()
+      .then(({ data }) => {
+        const uid = data.session?.user?.id;
+        if (uid) markSignupWelcomeShown(uid);
+      });
+    window.setTimeout(() => closeAuthModals(), 0);
+    window.setTimeout(() => closeAuthModals(), 250);
+    return true;
+  }, [closeAuthModals]);
 
   const onSessionResolved = useCallback(
     (sessionExists: boolean) => {
@@ -168,21 +123,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .then(({ data }) => {
           setSession(data.session);
         });
+      showWelcomeFromRegisteredQuery();
     },
-    [],
+    [showWelcomeFromRegisteredQuery],
   );
 
   const onShowWelcome = useCallback(
-    (message: string) => {
-      showSignupWelcome(message);
+    (_message?: string) => {
+      // 互換: 旧 Broadcast / show-welcome イベントからもクエリ方式を試す
+      showWelcomeFromRegisteredQuery();
     },
-    [showSignupWelcome],
+    [showWelcomeFromRegisteredQuery],
   );
 
   const welcomeAlreadyShown = useCallback(
     () => welcomeShownRef.current,
     [],
   );
+
+  useEffect(() => {
+    // マウント時・ブラウザ戻る等で ?registered=true を拾う
+    showWelcomeFromRegisteredQuery();
+    const onPopState = () => {
+      showWelcomeFromRegisteredQuery();
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [showWelcomeFromRegisteredQuery]);
 
   useEffect(() => {
     const supabase = getSupabase();
@@ -198,15 +165,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(data.session);
       wasLoggedInRef.current = Boolean(data.session);
       setReady(true);
-      const uid = data.session?.user?.id;
-      if (uid && hasSignupWelcomeShown(uid)) {
-        welcomeShownRef.current = true;
-        clearPendingSignup();
-        return;
-      }
-      if (data.session && hasPendingSignup() && !isAuthHelperPage()) {
-        showSignupWelcome();
-      }
+      showWelcomeFromRegisteredQuery();
     });
 
     const { data: sub } = supabase.auth.onAuthStateChange((event, next) => {
@@ -224,7 +183,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (event === "PASSWORD_RECOVERY") return;
       }
 
-      // バックグラウンドで届いた場合のフォールバック
       if (
         (event === "SIGNED_IN" ||
           event === "INITIAL_SESSION" ||
@@ -233,12 +191,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         next?.user
       ) {
         closeAuthModals();
-        if (hasSignupWelcomeShown(next.user.id)) {
-          welcomeShownRef.current = true;
-          clearPendingSignup();
-        } else if (hasPendingSignup()) {
-          showSignupWelcome();
-        }
+        showWelcomeFromRegisteredQuery();
         wasLoggedInRef.current = true;
       }
 
@@ -262,7 +215,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const detail = (e as CustomEvent<AuthUiEventDetail>).detail;
       if (!detail || isAuthHelperPage()) return;
       if (detail.type === "show-welcome") {
-        showSignupWelcome(detail.message);
+        showWelcomeFromRegisteredQuery();
       }
     };
     window.addEventListener(AUTH_UI_EVENT, onAuthUi);
@@ -288,7 +241,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.removeEventListener(AUTH_UI_EVENT, onAuthUi);
       channel?.close();
     };
-  }, [closeAuthModals, showSignupWelcome]);
+  }, [closeAuthModals, showWelcomeFromRegisteredQuery]);
 
   useEffect(() => {
     if (!isDevPersonaEnabled()) return;
@@ -343,6 +296,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const uid = session?.user?.id;
     if (uid) markSignupWelcomeShown(uid);
     welcomeShownRef.current = true;
+    // 念のため残っていれば除去
+    if (hasRegisteredQuery()) consumeRegisteredQueryParam();
     try {
       localStorage.removeItem(AUTH_PING_KEY);
     } catch {

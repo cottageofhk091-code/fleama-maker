@@ -4,6 +4,10 @@ import { useEffect, useState } from "react";
 import type { EmailOtpType } from "@supabase/supabase-js";
 import { BrandMark } from "@/components/brand-mark";
 import { translateAuthError } from "@/lib/auth-errors";
+import {
+  REGISTERED_QUERY_KEY,
+  REGISTERED_QUERY_VALUE,
+} from "@/lib/auth-redirect";
 import { notifySignupConfirmed } from "@/lib/auth-tab-sync";
 import { getSupabase } from "@/lib/supabase";
 import { SITE_NAME } from "@/lib/site";
@@ -57,6 +61,11 @@ export default function AuthConfirmedPage() {
         const refresh_token =
           hashParams.get("refresh_token") ||
           url.searchParams.get("refresh_token");
+        const registeredFlag =
+          url.searchParams.get(REGISTERED_QUERY_KEY) ===
+            REGISTERED_QUERY_VALUE ||
+          type === "signup" ||
+          type === "invite";
 
         if (tokenHash && type) {
           const { error } = await supabase.auth.verifyOtp({
@@ -77,6 +86,14 @@ export default function AuthConfirmedPage() {
 
         const { data } = await supabase.auth.getSession();
         if (data.session) {
+          // 新規登録完了はトップへ ?registered=true で飛ばし、ダイアログを確実に出す
+          if (registeredFlag && !cancelled) {
+            notifySignupConfirmed({ bonusGranted: true });
+            window.location.replace(
+              `/?${REGISTERED_QUERY_KEY}=${REGISTERED_QUERY_VALUE}`,
+            );
+            return;
+          }
           window.history.replaceState({}, "", "/auth/confirmed");
           finishOk();
           return;

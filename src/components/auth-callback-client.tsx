@@ -8,13 +8,12 @@ import {
 } from "@/lib/auth-session-from-url";
 import { translateAuthError } from "@/lib/auth-errors";
 import {
-  AUTH_CONFIRMED_PATH,
   PASSWORD_RESET_NOTICE_PATH,
 } from "@/lib/auth-redirect";
 import { notifyPasswordRecovery, notifySignupConfirmed } from "@/lib/auth-tab-sync";
 
 /**
- * 旧リンク互換: セッション確立後は案内ページへ転送（元タブ完結 UX）
+ * 旧リンク互換: セッション確立後は ?registered=true 付きでトップへ
  */
 export function AuthCallbackClient() {
   const router = useRouter();
@@ -45,7 +44,8 @@ export function AuthCallbackClient() {
       }
 
       notifySignupConfirmed({ bonusGranted: true });
-      router.replace(AUTH_CONFIRMED_PATH);
+      // 新規登録完了ダイアログ用クエリを付けてトップへ
+      router.replace("/?registered=true");
     })();
     return () => {
       cancelled = true;

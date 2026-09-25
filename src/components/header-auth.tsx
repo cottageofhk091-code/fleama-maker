@@ -96,11 +96,11 @@ export function HeaderAuthModal({
       setError(translateAuthError(result.error));
       return;
     }
-    // 認証完了検知用フラグを先にセット（元タブ戻りで歓迎モーダル表示）
+    // 認証完了後は確認リンク先で ?registered=true → 歓迎ダイアログ表示
     markPendingSignup(email.trim());
     becomeFreeUser();
     setInfo(
-      "確認メールを送信しました。メール内の「登録を完了する」リンクをクリックすると認証が完了します。元のこの画面に戻ると自動でログインし、Pro機能を1回無料でお試しできます。",
+      "確認メールを送信しました。メール内の「登録を完了する」リンクをクリックすると認証が完了し、完了画面で会員登録の御礼ダイアログが表示されます。Pro機能を1回無料でお試しできます。",
     );
   }
 

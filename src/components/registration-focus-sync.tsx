@@ -2,7 +2,7 @@
 
 /**
  * タブが前面に戻った瞬間に getSession() でログイン変化を拾う。
- * pending_registration === true && session あり → 歓迎モーダル表示を依頼。
+ * 歓迎モーダル表示は AuthProvider の ?registered=true 検知に任せる。
  */
 import { useEffect } from "react";
 import { getSupabase } from "@/lib/supabase";
@@ -10,12 +10,6 @@ import {
   AUTH_CHANNEL,
   AUTH_PING_KEY,
   AUTH_UI_EVENT,
-  PENDING_REGISTRATION_KEY,
-  SIGNUP_WELCOME_MESSAGE,
-  clearPendingSignup,
-  dispatchAuthUiEvent,
-  hasPendingSignup,
-  hasSignupWelcomeShown,
   isAuthHelperPage,
 } from "@/lib/auth-tab-sync";
 
@@ -36,59 +30,19 @@ export function RegistrationFocusSync({
 
     let busy = false;
 
-    const completeRegistrationIfNeeded = async (reason: string) => {
+    const syncSession = async (reason: string) => {
       if (busy || isAuthHelperPage()) return;
       busy = true;
       try {
         const { data } = await supabase.auth.getSession();
-        const userId = data.session?.user?.id ?? null;
-        const loggedIn = Boolean(userId);
+        const loggedIn = Boolean(data.session?.user?.id);
         onSessionResolved(loggedIn);
-
-        const pending = hasPendingSignup();
-        const alreadyShown =
-          welcomeAlreadyShown() || hasSignupWelcomeShown(userId);
-
-        console.info("[RegistrationFocusSync]", reason, {
-          loggedIn,
-          pending,
-          alreadyShown,
-        });
-
-        if (!loggedIn) return;
-
-        dispatchAuthUiEvent({ type: "close-auth-modal" });
-
-        // 既に表示済み → pending だけ掃除（モーダルは出さない）
-        if (alreadyShown) {
-          if (pending) clearPendingSignup();
-          try {
-            localStorage.removeItem(AUTH_PING_KEY);
-          } catch {
-            // ignore
-          }
-          return;
+        // トップ等で ?registered=true が付いている場合に拾う
+        if (loggedIn && !welcomeAlreadyShown()) {
+          onShowWelcome("");
         }
-
-        // 仕様: pending_registration === true のときだけ歓迎
-        if (pending) {
-          onShowWelcome(SIGNUP_WELCOME_MESSAGE);
-          return;
-        }
-
-        // pending が他経路で消えた競合対策: 直近 AUTH_PING のみ
-        try {
-          const ping = localStorage.getItem(AUTH_PING_KEY);
-          if (ping) {
-            const parsed = JSON.parse(ping) as { at?: number };
-            if (parsed.at && Date.now() - parsed.at < 5 * 60 * 1000) {
-              // ping がある＝確認タブ完了。pending が無い場合でも一度だけ促す
-              // （元タブで pending が残っているのが正常系）
-              onShowWelcome(SIGNUP_WELCOME_MESSAGE);
-            }
-          }
-        } catch {
-          // ignore
+        if (process.env.NODE_ENV !== "production") {
+          console.info("[RegistrationFocusSync]", reason, { loggedIn });
         }
       } finally {
         busy = false;
@@ -96,15 +50,15 @@ export function RegistrationFocusSync({
     };
 
     const onFocus = () => {
-      void completeRegistrationIfNeeded("window.focus");
+      void syncSession("window.focus");
     };
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
-        void completeRegistrationIfNeeded("visibilitychange");
+        void syncSession("visibilitychange");
       }
     };
     const onPageShow = () => {
-      void completeRegistrationIfNeeded("pageshow");
+      void syncSession("pageshow");
     };
 
     window.addEventListener("focus", onFocus);
@@ -114,10 +68,9 @@ export function RegistrationFocusSync({
     const onStorage = (e: StorageEvent) => {
       if (
         e.key === AUTH_PING_KEY ||
-        e.key === PENDING_REGISTRATION_KEY ||
         (e.key && (e.key.includes("auth-token") || e.key.startsWith("sb-")))
       ) {
-        void completeRegistrationIfNeeded(`storage:${e.key}`);
+        void syncSession(`storage:${e.key}`);
       }
     };
     window.addEventListener("storage", onStorage);
@@ -127,7 +80,7 @@ export function RegistrationFocusSync({
       channel = new BroadcastChannel(AUTH_CHANNEL);
       channel.onmessage = (event) => {
         if (event?.data?.type === "signup-confirmed") {
-          void completeRegistrationIfNeeded("broadcast");
+          void syncSession("broadcast");
         }
       };
     } catch {
@@ -140,18 +93,12 @@ export function RegistrationFocusSync({
         detail?.type === "signup-confirmed" ||
         detail?.type === "show-welcome"
       ) {
-        void completeRegistrationIfNeeded("auth-ui");
+        void syncSession("auth-ui");
       }
     };
     window.addEventListener(AUTH_UI_EVENT, onAuthUi);
 
-    const poll = window.setInterval(() => {
-      if (hasPendingSignup() && document.visibilityState === "visible") {
-        void completeRegistrationIfNeeded("poll");
-      }
-    }, 2000);
-
-    void completeRegistrationIfNeeded("mount");
+    void syncSession("mount");
 
     return () => {
       window.removeEventListener("focus", onFocus);
@@ -159,7 +106,6 @@ export function RegistrationFocusSync({
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("storage", onStorage);
       window.removeEventListener(AUTH_UI_EVENT, onAuthUi);
-      window.clearInterval(poll);
       channel?.close();
     };
   }, [onSessionResolved, onShowWelcome, welcomeAlreadyShown]);

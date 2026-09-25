@@ -10,6 +10,10 @@
 export const AUTH_CONFIRMED_PATH = "/auth/confirmed";
 export const PASSWORD_RESET_NOTICE_PATH = "/auth/password-reset-notice";
 
+/** 新規登録完了ダイアログ表示用（URL クエリ。localStorage 非依存） */
+export const REGISTERED_QUERY_KEY = "registered";
+export const REGISTERED_QUERY_VALUE = "true";
+
 const FLEAMA_PRODUCTION_ORIGIN = "https://fleama-maker.vercel.app";
 
 function stripTrailingSlash(url: string): string {
@@ -53,12 +57,24 @@ export function getAuthRedirectBase(request?: Request): string {
   return FLEAMA_PRODUCTION_ORIGIN;
 }
 
-/** 新規登録・メール確認後 → /auth/confirmed */
+/** 新規登録・メール確認後 → /auth/confirmed?registered=true */
 export function getAuthCallbackUrl(
   _nextPath = "/",
   request?: Request,
 ): string {
-  return `${getAuthRedirectBase(request)}${AUTH_CONFIRMED_PATH}`;
+  const url = new URL(
+    AUTH_CONFIRMED_PATH,
+    `${getAuthRedirectBase(request)}/`,
+  );
+  url.searchParams.set(REGISTERED_QUERY_KEY, REGISTERED_QUERY_VALUE);
+  return url.toString();
+}
+
+/** 認証完了後にトップへ戻すときの URL（?registered=true） */
+export function getRegisteredHomeUrl(request?: Request): string {
+  const url = new URL("/", `${getAuthRedirectBase(request)}/`);
+  url.searchParams.set(REGISTERED_QUERY_KEY, REGISTERED_QUERY_VALUE);
+  return url.toString();
 }
 
 /** パスワードリセットメールの戻り先 → /auth/password-reset-notice */
@@ -69,6 +85,7 @@ export function getPasswordResetRedirectUrl(request?: Request): string {
 /**
  * Supabase の action_link（共有 Site URL 経由）を使わず、
  * hashed_token からフリマリスト直リンクを組み立てる。
+ * 新規登録系は ?registered=true を必ず付与する。
  */
 export function buildAppAuthActionUrl(params: {
   tokenHash: string;
@@ -82,7 +99,41 @@ export function buildAppAuthActionUrl(params: {
   const url = new URL(path, `${getAuthRedirectBase(params.request)}/`);
   url.searchParams.set("token_hash", params.tokenHash);
   url.searchParams.set("type", params.type);
+  if (params.type !== "recovery") {
+    url.searchParams.set(REGISTERED_QUERY_KEY, REGISTERED_QUERY_VALUE);
+  }
   return url.toString();
+}
+
+/** 現在の URL に registered=true があるか */
+export function hasRegisteredQuery(href?: string): boolean {
+  if (typeof window === "undefined" && !href) return false;
+  try {
+    const url = new URL(href ?? window.location.href);
+    return url.searchParams.get(REGISTERED_QUERY_KEY) === REGISTERED_QUERY_VALUE;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * registered=true を検知したら URL から除去して true を返す。
+ * （ダイアログ表示直後に呼び、リロード再表示を防ぐ）
+ */
+export function consumeRegisteredQueryParam(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get(REGISTERED_QUERY_KEY) !== REGISTERED_QUERY_VALUE) {
+      return false;
+    }
+    url.searchParams.delete(REGISTERED_QUERY_KEY);
+    const next = `${url.pathname}${url.search}${url.hash}`;
+    window.history.replaceState({}, "", next);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
