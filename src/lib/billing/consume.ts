@@ -81,8 +81,6 @@ export function getQuotaSnapshot(
   }
 
   const isPaidPro = isUnlimitedPlan(state.plan);
-  const isPro = isPaidPro || proTrialActive;
-  const isPremium = isPro;
   const freeCredits = Math.max(0, Math.floor(state.freeCredits ?? 0));
   // free_credits を正とする（残0なら必ず消費済み）
   const hasUsedProTrial = freeCredits <= 0;
@@ -90,8 +88,10 @@ export function getQuotaSnapshot(
     isAuthenticated &&
     (state.plan === "free" || state.plan === "visitor") &&
     !isPaidPro &&
-    freeCredits >= 1 &&
-    !proTrialActive;
+    freeCredits >= 1;
+  // 残り枠がある間は Pro 制限をスルー（成功時に API が消費）
+  const isPro = isPaidPro || proTrialActive || canUseProTrial;
+  const isPremium = isPro;
 
   const freeLimit = Number.POSITIVE_INFINITY;
   const freeRemaining = Number.POSITIVE_INFINITY;
@@ -112,10 +112,8 @@ export function getQuotaSnapshot(
   let indicatorLabel: string;
   if (isPaidPro) {
     indicatorLabel = "Sold Pro：一括生成・SEO予測つき無制限";
-  } else if (proTrialActive) {
-    indicatorLabel = "Proお試し中：今回限り解放";
-  } else if (canUseProTrial) {
-    indicatorLabel = `標準生成：無料無制限 · Proお試し残り${freeCredits}回`;
+  } else if (proTrialActive || canUseProTrial) {
+    indicatorLabel = `標準生成：無料無制限 · Proお試し残り${Math.max(1, freeCredits)}回`;
   } else if (hasUsedProTrial) {
     indicatorLabel = "標準生成：無料無制限 · Proお試し済み";
   } else {

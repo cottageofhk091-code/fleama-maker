@@ -32,6 +32,19 @@ function normalizeCredits(
   return hasUsedProTrial ? 0 : 1;
 }
 
+function isMissingCreditsColumn(error: {
+  message?: string;
+  code?: string;
+} | null): boolean {
+  if (!error) return false;
+  const msg = error.message || "";
+  return (
+    error.code === "PGRST204" ||
+    error.code === "42703" ||
+    /free_credits|free_pro_credits/i.test(msg)
+  );
+}
+
 function trialTokenSecret(): string {
   return (
     process.env.SESSION_SECRET?.trim() ||
@@ -74,12 +87,98 @@ export function verifyProTrialToken(
   }
 }
 
+/** profiles 列が無い環境向け: auth user_metadata に free_credits を保持 */
+async function readMetadataCredits(
+  userId: string,
+): Promise<FreeCreditsSnapshot> {
+  const admin = getSupabaseAdmin();
+  if (!admin) {
+    return {
+      freeCredits: 1,
+      hasUsedProTrial: false,
+      planType: PROFILE_PLAN.free,
+    };
+  }
+
+  const { data, error } = await admin.auth.admin.getUserById(userId);
+  if (error || !data.user) {
+    console.error("[free-credits] metadata getUserById:", error);
+    return {
+      freeCredits: 1,
+      hasUsedProTrial: false,
+      planType: PROFILE_PLAN.free,
+    };
+  }
+
+  const meta = (data.user.user_metadata ?? {}) as Record<string, unknown>;
+  const usedFlag = Boolean(meta.has_used_pro_trial);
+  const rawCredits =
+    typeof meta.free_credits === "number"
+      ? meta.free_credits
+      : typeof meta.free_pro_credits === "number"
+        ? meta.free_pro_credits
+        : null;
+
+  let freeCredits = normalizeCredits(rawCredits, usedFlag);
+
+  // 未設定なら初回 1 を書き込む
+  if (rawCredits == null && !usedFlag) {
+    await writeMetadataCredits(userId, 1, false, meta);
+    freeCredits = 1;
+  }
+
+  if (usedFlag || freeCredits <= 0) {
+    freeCredits = 0;
+  }
+
+  return {
+    freeCredits,
+    hasUsedProTrial: freeCredits <= 0,
+    planType:
+      typeof meta.plan_type === "string" ? meta.plan_type : PROFILE_PLAN.free,
+  };
+}
+
+async function writeMetadataCredits(
+  userId: string,
+  freeCredits: number,
+  hasUsedProTrial: boolean,
+  existingMeta?: Record<string, unknown>,
+): Promise<boolean> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return false;
+
+  let meta = existingMeta;
+  if (!meta) {
+    const { data } = await admin.auth.admin.getUserById(userId);
+    meta = (data.user?.user_metadata ?? {}) as Record<string, unknown>;
+  }
+
+  const { error } = await admin.auth.admin.updateUserById(userId, {
+    user_metadata: {
+      ...meta,
+      free_credits: freeCredits,
+      free_pro_credits: freeCredits,
+      has_used_pro_trial: hasUsedProTrial,
+      plan_type: meta.plan_type ?? PROFILE_PLAN.free,
+    },
+  });
+  if (error) {
+    console.error("[free-credits] metadata update:", error);
+    return false;
+  }
+  return true;
+}
+
 /**
- * 新規登録時: profiles を free_credits=1 で確実に作成（Service Role）
+ * 新規登録時: free_credits=1 を profiles（可能なら）＋ user_metadata に確実に付与
  */
 export async function ensureSignupProfile(userId: string): Promise<void> {
   const admin = getSupabaseAdmin();
   if (!admin || !userId.trim()) return;
+
+  // 常に metadata に初期値を保証（列未作成環境のフォールバック）
+  await writeMetadataCredits(userId, 1, false);
 
   const { data, error } = await admin
     .from("profiles")
@@ -89,6 +188,12 @@ export async function ensureSignupProfile(userId: string): Promise<void> {
 
   if (error) {
     console.error("[free-credits] ensureSignupProfile select:", error);
+    if (isMissingCreditsColumn(error)) {
+      console.warn(
+        "[free-credits] profiles.free_credits 未作成のため user_metadata を使用中。SQL migration の適用を推奨。",
+      );
+    }
+    return;
   }
 
   const row = data as ProfileRow | null;
@@ -106,14 +211,7 @@ export async function ensureSignupProfile(userId: string): Promise<void> {
     );
     if (upsertError) {
       console.error("[free-credits] ensureSignupProfile insert:", upsertError);
-      if (
-        /free_credits/i.test(upsertError.message || "") ||
-        upsertError.code === "PGRST204"
-      ) {
-        console.error(
-          "[free-credits] profiles.free_credits 列がありません。supabase/migrations/20260325_profiles_free_credits.sql を SQL Editor で実行してください。",
-        );
-      }
+      // metadata は既に 1 を書いているので継続可能
     }
     return;
   }
@@ -130,7 +228,7 @@ export async function ensureSignupProfile(userId: string): Promise<void> {
 }
 
 /**
- * profiles から free_credits を取得。NULL は初回のみ 1 にフォールバック
+ * free_credits を取得。NULL は初回のみ 1。列が無い場合は user_metadata へフォールバック
  */
 export async function getFreeCreditsSnapshot(
   userId: string,
@@ -146,16 +244,16 @@ export async function getFreeCreditsSnapshot(
 
   if (error) {
     console.error("[free-credits] getFreeCreditsSnapshot:", error);
-    return null;
+    if (isMissingCreditsColumn(error)) {
+      return readMetadataCredits(userId);
+    }
+    // その他エラーでも metadata を試す
+    return readMetadataCredits(userId);
   }
 
   if (!data) {
     await ensureSignupProfile(userId);
-    return {
-      freeCredits: 1,
-      hasUsedProTrial: false,
-      planType: PROFILE_PLAN.free,
-    };
+    return readMetadataCredits(userId);
   }
 
   const row = data as ProfileRow;
@@ -167,6 +265,7 @@ export async function getFreeCreditsSnapshot(
       .from("profiles")
       .update({ free_credits: 1, has_used_pro_trial: false })
       .eq("id", userId);
+    await writeMetadataCredits(userId, 1, false);
     freeCredits = 1;
   }
 
@@ -196,17 +295,18 @@ export type ProCreditCheckResult =
 
 /**
  * Pro 機能実行前のクレジット確認
- * trialToken がある場合は消費済みお試し枠内の継続リクエストとして許可
  */
 export async function checkProCredits(
   userId: string | null,
   options?: { trialToken?: string | null },
 ): Promise<ProCreditCheckResult> {
   if (isDevProBypassEnabled()) {
+    console.log("[Credit Check]", { userId, credits: 0, bypass: true });
     return { ok: true, paid: true, shouldConsume: false, freeCredits: 0 };
   }
 
   if (!userId) {
+    console.log("[Credit Check]", { userId: null, credits: 0 });
     console.error(
       "[Pro Credit Check Error]: userId=(missing) free_credits=(n/a)",
     );
@@ -218,6 +318,11 @@ export async function checkProCredits(
   }
 
   if (verifyProTrialToken(userId, options?.trialToken)) {
+    console.log("[Credit Check]", {
+      userId,
+      credits: 0,
+      trialToken: true,
+    });
     return {
       ok: true,
       paid: false,
@@ -229,6 +334,8 @@ export async function checkProCredits(
   const snap = await getFreeCreditsSnapshot(userId);
   const freeCredits = snap?.freeCredits ?? 0;
   const planType = snap?.planType ?? null;
+
+  console.log("[Credit Check]", { userId, credits: freeCredits });
 
   if (planType === PROFILE_PLAN.paid) {
     return {
@@ -292,16 +399,49 @@ export async function consumeFreeCredit(
       `[Pro Credit Check Error]: userId=${userId} free_credits=(update-error)`,
       error,
     );
+    if (isMissingCreditsColumn(error)) {
+      const ok = await writeMetadataCredits(userId, 0, true);
+      if (ok) {
+        return {
+          success: true,
+          remainingCredits: 0,
+          trialToken: issueProTrialToken(userId),
+        };
+      }
+    }
+    // profiles 更新失敗時も metadata で消費を試みる
+    const metaOk = await writeMetadataCredits(userId, 0, true);
+    if (metaOk) {
+      return {
+        success: true,
+        remainingCredits: 0,
+        trialToken: issueProTrialToken(userId),
+      };
+    }
     return { success: false, remainingCredits: 0 };
   }
 
   if (!data) {
-    const snap = await getFreeCreditsSnapshot(userId);
+    // 行なし / 既に 0 → metadata 側を確認して消費
+    const snap = await readMetadataCredits(userId);
+    if (snap.freeCredits >= 1) {
+      const ok = await writeMetadataCredits(userId, 0, true);
+      if (ok) {
+        return {
+          success: true,
+          remainingCredits: 0,
+          trialToken: issueProTrialToken(userId),
+        };
+      }
+    }
     console.error(
-      `[Pro Credit Check Error]: userId=${userId} free_credits=${snap?.freeCredits ?? 0}`,
+      `[Pro Credit Check Error]: userId=${userId} free_credits=${snap.freeCredits}`,
     );
     return { success: false, remainingCredits: 0 };
   }
+
+  // profiles 成功時も metadata を同期
+  await writeMetadataCredits(userId, 0, true);
 
   return {
     success: true,

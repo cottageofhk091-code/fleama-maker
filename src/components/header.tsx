@@ -9,6 +9,7 @@ import { ThemeToggle } from "./theme-toggle";
 import { BrandMark } from "./brand-mark";
 import { HeaderAuthModal } from "./header-auth";
 import { PricingPlansButton } from "./pricing-plans-modal";
+import { ProTrialHeaderBadge } from "@/components/billing/pro-trial-header-badge";
 import { useAuth } from "@/components/auth-provider";
 import { getSupabase } from "@/lib/supabase";
 import {
@@ -158,14 +159,17 @@ export function Header() {
           {!showAuth ? (
             <div className="h-9 w-36 animate-pulse rounded-lg bg-slate-200/70 dark:bg-slate-800/70" />
           ) : effectiveUser ? (
-            <button
-              type="button"
-              onClick={() => void handleSignOut()}
-              className={subBtn}
-            >
-              <LogOut className="h-3.5 w-3.5" />
-              ログアウト
-            </button>
+            <>
+              <ProTrialHeaderBadge />
+              <button
+                type="button"
+                onClick={() => void handleSignOut()}
+                className={subBtn}
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                ログアウト
+              </button>
+            </>
           ) : (
             <div className="flex items-center gap-2">
               <button
