@@ -9,7 +9,20 @@ export const AUTH_RECOVERY_PING_KEY = "fleama_auth_recovery_ping";
 export const AUTH_CHANNEL = "fleama_auth";
 
 export const SIGNUP_WELCOME_MESSAGE =
-  "新規登録ありがとうございます！Pro機能を1回無料でお試しいただけます。";
+  "会員登録が完了しました！Pro機能を1回無料でお試しいただけます。";
+
+/** 元タブの Auth UI（モーダル閉鎖など）向けカスタムイベント */
+export const AUTH_UI_EVENT = "fleama_auth_ui";
+
+export type AuthUiEventDetail =
+  | { type: "signup-confirmed"; bonusGranted?: boolean }
+  | { type: "close-auth-modal" }
+  | { type: "password-recovery" };
+
+export function dispatchAuthUiEvent(detail: AuthUiEventDetail): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(AUTH_UI_EVENT, { detail }));
+}
 
 export function markPendingSignup(email: string): void {
   try {
@@ -88,6 +101,9 @@ export function notifySignupConfirmed(payload: { bonusGranted?: boolean } = {}):
   } catch {
     // ignore
   }
+  // 確認タブ自身でもモーダル閉鎖・歓迎表示を起こせるよう同タブ向けにも通知
+  dispatchAuthUiEvent({ type: "signup-confirmed", ...payload });
+  dispatchAuthUiEvent({ type: "close-auth-modal" });
 }
 
 export function notifyPasswordRecovery(): void {
@@ -107,4 +123,5 @@ export function notifyPasswordRecovery(): void {
   } catch {
     // ignore
   }
+  dispatchAuthUiEvent({ type: "password-recovery" });
 }

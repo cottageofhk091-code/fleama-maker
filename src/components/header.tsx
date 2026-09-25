@@ -11,6 +11,10 @@ import { HeaderAuthModal } from "./header-auth";
 import { PricingPlansButton } from "./pricing-plans-modal";
 import { useAuth } from "@/components/auth-provider";
 import { getSupabase } from "@/lib/supabase";
+import {
+  AUTH_CHANNEL,
+  AUTH_UI_EVENT,
+} from "@/lib/auth-tab-sync";
 import { SITE_NAME, SITE_SHORT_NAME } from "@/lib/site";
 
 const navLinkClass =
@@ -44,19 +48,59 @@ export function Header() {
       setAuthReady(true);
     });
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
       setAuthReady(true);
+      // ログイン成立・セッション復元時は認証モーダルを閉じる
+      if (
+        session?.user &&
+        (event === "SIGNED_IN" ||
+          event === "INITIAL_SESSION" ||
+          event === "TOKEN_REFRESHED" ||
+          event === "USER_UPDATED")
+      ) {
+        setModalMode(null);
+      }
     });
+
+    const onAuthUi = (e: Event) => {
+      const detail = (e as CustomEvent<{ type?: string }>).detail;
+      if (
+        detail?.type === "close-auth-modal" ||
+        detail?.type === "signup-confirmed"
+      ) {
+        setModalMode(null);
+      }
+    };
+    window.addEventListener(AUTH_UI_EVENT, onAuthUi);
+
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel(AUTH_CHANNEL);
+      channel.onmessage = (event) => {
+        if (event?.data?.type === "signup-confirmed") {
+          setModalMode(null);
+        }
+      };
+    } catch {
+      channel = null;
+    }
 
     return () => {
       mounted = false;
       sub.subscription.unsubscribe();
+      window.removeEventListener(AUTH_UI_EVENT, onAuthUi);
+      channel?.close();
     };
   }, []);
 
   const effectiveUser = devUnauthenticated ? null : (user ?? authUser);
   const showAuth = authReady && ready;
+
+  // ログイン状態になったらモーダルは必ず閉じる（確認メール完了の元タブ復帰含む）
+  useEffect(() => {
+    if (effectiveUser) setModalMode(null);
+  }, [effectiveUser]);
 
   async function handleSignOut() {
     const supabase = getSupabase();
