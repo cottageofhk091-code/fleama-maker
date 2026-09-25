@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Bookmark, Layers, PenLine } from "lucide-react";
+import { Bookmark, Layers, PenLine, RotateCcw } from "lucide-react";
 import { ProductForm } from "@/components/product-form";
 import { ResultPanel } from "@/components/result-panel";
 import { LoadingOverlay } from "@/components/loading-overlay";
@@ -23,9 +23,18 @@ export function HomeClient() {
   const [result, setResult] = useState<GenerateResult | null>(null);
   const [lastInput, setLastInput] = useState<ProductInput | null>(null);
   const [templateMessage, setTemplateMessage] = useState<string | null>(null);
+  const [formKey, setFormKey] = useState(0);
 
   const singleInsights =
     result && lastInput ? computeSeoInsights(lastInput, result) : null;
+
+  function handleResetAll() {
+    setFormKey((k) => k + 1);
+    setResult(null);
+    setLastInput(null);
+    setTemplateMessage(null);
+    setLoading(false);
+  }
 
   function handleSaveTemplate() {
     if (!result || !lastInput) return;
@@ -108,6 +117,7 @@ export function HomeClient() {
           <div className="grid gap-6 lg:grid-cols-5">
             <div className="space-y-4 lg:col-span-2">
               <ProductForm
+                key={formKey}
                 disabled={loading}
                 onLoadingChange={setLoading}
                 onGenerated={(generated, input) => {
@@ -116,6 +126,14 @@ export function HomeClient() {
                   setTemplateMessage(null);
                 }}
               />
+              <button
+                type="button"
+                onClick={handleResetAll}
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                <RotateCcw className="h-4 w-4" />
+                情報をリセット
+              </button>
               {lastInput && (
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   確定情報: {lastInput.brand} / {lastInput.productName} /{" "}
@@ -132,20 +150,30 @@ export function HomeClient() {
                         トレンドSEO適用済み
                       </span>
                     )}
-                    <button
-                      type="button"
-                      onClick={handleSaveTemplate}
-                      disabled={
-                        !quota.canSaveTemplate && !quota.isPremium
-                      }
-                      className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                    >
-                      <Bookmark className="h-3.5 w-3.5" />
-                      テンプレート保存
-                      {quota.plan === "free" && quota.templateLimit != null
-                        ? `（${quota.templateCount}/${quota.templateLimit}）`
-                        : ""}
-                    </button>
+                    <div className="ml-auto flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleResetAll}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        新しい生成を作成
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSaveTemplate}
+                        disabled={
+                          !quota.canSaveTemplate && !quota.isPremium
+                        }
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                      >
+                        <Bookmark className="h-3.5 w-3.5" />
+                        テンプレート保存
+                        {quota.plan === "free" && quota.templateLimit != null
+                          ? `（${quota.templateCount}/${quota.templateLimit}）`
+                          : ""}
+                      </button>
+                    </div>
                   </div>
 
                   {result && (

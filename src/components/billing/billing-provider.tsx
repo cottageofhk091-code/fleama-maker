@@ -78,6 +78,11 @@ type BillingContextValue = {
   applyRemainingCredits: (remainingCredits: number) => void;
   /** お試し消費後の Pro API 用トークン */
   trialToken: string | null;
+  /**
+   * ログインユーザーの free_credits がサーバー同期済みか。
+   * false の間はヘッダーで仮の「残り1回」を出さない。
+   */
+  creditsReady: boolean;
 };
 
 const BillingContext = createContext<BillingContextValue | null>(null);
@@ -119,6 +124,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
   const [trialToken, setTrialToken] = useState<string | null>(null);
   const [trialConfirmOpen, setTrialConfirmOpen] = useState(false);
   const [trialConfirmLoading, setTrialConfirmLoading] = useState(false);
+  const [creditsReady, setCreditsReady] = useState(false);
   const stateRef = useRef(state);
   const trialConsumingRef = useRef(false);
   const welcomeWasOpenRef = useRef(false);
@@ -163,7 +169,10 @@ export function BillingProvider({ children }: { children: ReactNode }) {
   const refreshFreeCredits = useCallback(async () => {
     if (!user?.id) return;
     const remote = await loadFreeCreditsFromServer(user.id);
-    if (!remote) return;
+    if (!remote) {
+      setCreditsReady(true);
+      return;
+    }
 
     const current = stateRef.current;
     const nextPlan =
@@ -177,8 +186,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       freeCredits: remote.freeCredits,
       hasUsedProTrial: remote.hasUsedProTrial,
     });
-
-    // お試しセッション中はサーバー同期でロックを戻さない
+    setCreditsReady(true);
   }, [persist, user?.id]);
 
   const applyRemainingCredits = useCallback(
@@ -199,9 +207,11 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     if (!ready || !authReady) return;
     if (!user?.id) {
       setProTrialActive(false);
+      setCreditsReady(true);
       return;
     }
 
+    setCreditsReady(false);
     let cancelled = false;
     void (async () => {
       const remote = await loadFreeCreditsFromServer(user.id);
@@ -214,16 +224,18 @@ export function BillingProvider({ children }: { children: ReactNode }) {
           : current.plan;
 
       if (remote == null) {
-        // DB 取得失敗時はローカルの「消費済み」でサーバを上書きしない
-        if (current.plan === "visitor") {
-          persist({
-            ...current,
-            plan: "free",
-            // 新規ログイン直後は残り1を優先（汚染 localStorage を捨てる）
-            freeCredits: 1,
-            hasUsedProTrial: false,
-          });
-        }
+        // 取得失敗時は「残り1」を捏造しない。ローカルの消費済みを優先
+        persist({
+          ...current,
+          plan: nextPlan === "premium" ? "pro" : nextPlan,
+          freeCredits:
+            current.hasUsedProTrial || current.freeCredits <= 0
+              ? 0
+              : current.freeCredits,
+          hasUsedProTrial:
+            current.hasUsedProTrial || current.freeCredits <= 0,
+        });
+        setCreditsReady(true);
         return;
       }
 
@@ -233,8 +245,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
         freeCredits: remote.freeCredits,
         hasUsedProTrial: remote.hasUsedProTrial,
       });
-
-      // お試しセッション中はサーバー同期でロックを戻さない
+      setCreditsReady(true);
     })();
 
     return () => {
@@ -399,6 +410,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
         freeCredits: 0,
         hasUsedProTrial: true,
       });
+      setCreditsReady(true);
       return true;
     } catch (error) {
       console.error("Pro trial consume failed:", error);
@@ -551,6 +563,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       refreshFreeCredits,
       applyRemainingCredits,
       trialToken,
+      creditsReady,
     }),
     [
       ready,
@@ -574,6 +587,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       refreshFreeCredits,
       applyRemainingCredits,
       trialToken,
+      creditsReady,
     ],
   );
 

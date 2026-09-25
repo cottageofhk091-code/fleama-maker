@@ -15,7 +15,9 @@ import {
   clearPendingSignup,
   dispatchAuthUiEvent,
   hasPendingSignup,
+  hasSignupWelcomeShown,
   isAuthHelperPage,
+  markSignupWelcomeShown,
 } from "@/lib/auth-tab-sync";
 
 type Props = {
@@ -23,7 +25,7 @@ type Props = {
   onSessionResolved: (sessionExists: boolean) => void;
   /** 歓迎メッセージ表示 */
   onShowWelcome: (message: string) => void;
-  /** 既に歓迎済みなら true */
+  /** 既に歓迎済みなら true（メモリ） */
   welcomeAlreadyShown: () => boolean;
 };
 
@@ -42,15 +44,19 @@ export function RegistrationFocusSync({
       if (busy || isAuthHelperPage()) return;
       busy = true;
       try {
-        // 共有ストレージの最新を読む（他タブのセッション書き込み後）
         const { data } = await supabase.auth.getSession();
-        const loggedIn = Boolean(data.session?.user);
+        const userId = data.session?.user?.id ?? null;
+        const loggedIn = Boolean(userId);
         onSessionResolved(loggedIn);
 
         const pending = hasPendingSignup();
+        const alreadyShown =
+          welcomeAlreadyShown() || hasSignupWelcomeShown(userId);
+
         console.info("[RegistrationFocusSync]", reason, {
           loggedIn,
           pending,
+          alreadyShown,
         });
 
         if (!loggedIn) return;
@@ -58,14 +64,27 @@ export function RegistrationFocusSync({
         // ログイン済みなら認証モーダルは常に閉じる
         dispatchAuthUiEvent({ type: "close-auth-modal" });
 
+        // 既に感謝ダイアログ表示済み → フラグ掃除のみ（再表示しない）
+        if (alreadyShown) {
+          clearPendingSignup();
+          try {
+            localStorage.removeItem(AUTH_PING_KEY);
+          } catch {
+            // ignore
+          }
+          return;
+        }
+
         if (!pending) {
-          // AUTH_PING 直近なら歓迎（pending が消えた競合対策）
+          // AUTH_PING 直近のみ歓迎（pending が消えた競合対策）
+          // ただし welcome 表示済みユーザーでは絶対に再表示しない
           try {
             const ping = localStorage.getItem(AUTH_PING_KEY);
-            if (ping && !welcomeAlreadyShown()) {
+            if (ping) {
               const parsed = JSON.parse(ping) as { at?: number };
               if (parsed.at && Date.now() - parsed.at < 5 * 60 * 1000) {
                 onShowWelcome(SIGNUP_WELCOME_MESSAGE);
+                markSignupWelcomeShown(userId);
                 localStorage.removeItem(AUTH_PING_KEY);
                 clearPendingSignup();
               }
@@ -76,11 +95,10 @@ export function RegistrationFocusSync({
           return;
         }
 
-        // pending_registration === true && session あり → 完了フロー
-        if (!welcomeAlreadyShown()) {
-          onShowWelcome(SIGNUP_WELCOME_MESSAGE);
-        }
-        clearPendingSignup(); // localStorage.removeItem('pending_registration')
+        // pending_registration === true && session あり → 完了フロー（1回限り）
+        onShowWelcome(SIGNUP_WELCOME_MESSAGE);
+        markSignupWelcomeShown(userId);
+        clearPendingSignup();
         dispatchAuthUiEvent({ type: "close-auth-modal" });
         try {
           localStorage.removeItem(AUTH_PING_KEY);
@@ -108,7 +126,6 @@ export function RegistrationFocusSync({
     window.addEventListener("pageshow", onPageShow);
     document.addEventListener("visibilitychange", onVisibility);
 
-    // 他タブの ping / pending 変更
     const onStorage = (e: StorageEvent) => {
       if (
         e.key === AUTH_PING_KEY ||
@@ -140,14 +157,12 @@ export function RegistrationFocusSync({
     };
     window.addEventListener(AUTH_UI_EVENT, onAuthUi);
 
-    // pending 中は短いポーリング（focus 取りこぼし対策）
     const poll = window.setInterval(() => {
       if (hasPendingSignup() && document.visibilityState === "visible") {
         void completeRegistrationIfNeeded("poll");
       }
     }, 2000);
 
-    // マウント直後も一度チェック
     void completeRegistrationIfNeeded("mount");
 
     return () => {

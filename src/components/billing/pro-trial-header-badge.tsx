@@ -8,10 +8,22 @@ import { useAuth } from "@/components/auth-provider";
  */
 export function ProTrialHeaderBadge() {
   const { ready: authReady, user } = useAuth();
-  const { ready, quota } = useBilling();
+  const { ready, quota, creditsReady } = useBilling();
 
   if (!authReady || !ready || !user) return null;
   if (quota.isPaidPro) return null;
+
+  // サーバー同期前は仮の「残り1回」を出さない
+  if (!creditsReady) {
+    return (
+      <span
+        className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-1.5 py-1 text-[10px] font-semibold leading-tight text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 sm:px-2 sm:text-[11px]"
+        title="お試し枠を確認中"
+      >
+        読込中...
+      </span>
+    );
+  }
 
   const remaining = Math.max(0, quota.freeCredits);
   const available = remaining >= 1 && !quota.hasUsedProTrial;

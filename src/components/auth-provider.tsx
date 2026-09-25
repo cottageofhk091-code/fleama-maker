@@ -25,7 +25,9 @@ import {
   dispatchAuthUiEvent,
   hasPendingRecovery,
   hasPendingSignup,
+  hasSignupWelcomeShown,
   isAuthHelperPage,
+  markSignupWelcomeShown,
 } from "@/lib/auth-tab-sync";
 import { getSupabase } from "@/lib/supabase";
 import {
@@ -81,17 +83,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const showSignupWelcome = useCallback(
     (_message?: string) => {
       closeAuthModals();
-      if (welcomeShownRef.current) {
+      const userId =
+        session?.user?.id ??
+        null;
+      // session 未反映時は Supabase から取得を試みる（同期的に最新を読む）
+      void (async () => {
+        let uid = userId;
+        if (!uid) {
+          const { data } = (await getSupabase()?.auth.getSession()) ?? {
+            data: { session: null },
+          };
+          uid = data.session?.user?.id ?? null;
+        }
+        if (welcomeShownRef.current || hasSignupWelcomeShown(uid)) {
+          clearPendingSignup();
+          markSignupWelcomeShown(uid);
+          return;
+        }
+        welcomeShownRef.current = true;
+        markSignupWelcomeShown(uid);
+        setWelcomeOpen(true);
         clearPendingSignup();
-        return;
-      }
-      welcomeShownRef.current = true;
-      setWelcomeOpen(true);
-      clearPendingSignup();
-      window.setTimeout(() => closeAuthModals(), 0);
-      window.setTimeout(() => closeAuthModals(), 250);
+        window.setTimeout(() => closeAuthModals(), 0);
+        window.setTimeout(() => closeAuthModals(), 250);
+      })();
     },
-    [closeAuthModals],
+    [closeAuthModals, session?.user?.id],
   );
 
   const onSessionResolved = useCallback(
@@ -133,6 +150,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(data.session);
       wasLoggedInRef.current = Boolean(data.session);
       setReady(true);
+      const uid = data.session?.user?.id;
+      if (uid && hasSignupWelcomeShown(uid)) {
+        welcomeShownRef.current = true;
+        clearPendingSignup();
+        return;
+      }
       if (data.session && hasPendingSignup() && !isAuthHelperPage()) {
         showSignupWelcome();
       }
@@ -162,7 +185,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         next?.user
       ) {
         closeAuthModals();
-        if (hasPendingSignup()) {
+        if (hasSignupWelcomeShown(next.user.id)) {
+          welcomeShownRef.current = true;
+          clearPendingSignup();
+        } else if (hasPendingSignup()) {
           showSignupWelcome();
         }
         wasLoggedInRef.current = true;
@@ -265,7 +291,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const closeWelcome = useCallback(() => {
     setWelcomeOpen(false);
-  }, []);
+    clearPendingSignup();
+    const uid = session?.user?.id;
+    markSignupWelcomeShown(uid);
+    welcomeShownRef.current = true;
+  }, [session?.user?.id]);
 
   const closePasswordRecovery = useCallback(() => {
     setPasswordRecoveryOpen(false);

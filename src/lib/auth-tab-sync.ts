@@ -28,6 +28,9 @@ export const SIGNUP_WELCOME_MESSAGE = SIGNUP_WELCOME_BODY;
 
 export const AUTH_UI_EVENT = "fleama_auth_ui";
 
+/** 会員登録完了ダイアログを一度表示済み（userId 単位） */
+export const SIGNUP_WELCOME_SHOWN_PREFIX = "fleama_signup_welcome_shown:";
+
 export type AuthUiEventDetail =
   | { type: "signup-confirmed"; bonusGranted?: boolean }
   | { type: "close-auth-modal" }
@@ -38,6 +41,47 @@ export function dispatchAuthUiEvent(detail: AuthUiEventDetail): void {
   if (typeof window === "undefined") return;
   try {
     window.dispatchEvent(new CustomEvent(AUTH_UI_EVENT, { detail }));
+  } catch {
+    // ignore
+  }
+}
+
+function welcomeShownStorageKey(userId: string): string {
+  return `${SIGNUP_WELCOME_SHOWN_PREFIX}${userId}`;
+}
+
+/** 感謝ダイアログ表示済みを永続化（リロード重複防止） */
+export function markSignupWelcomeShown(userId?: string | null): void {
+  clearPendingSignup();
+  try {
+    localStorage.removeItem(AUTH_PING_KEY);
+  } catch {
+    // ignore
+  }
+  if (!userId?.trim()) return;
+  try {
+    localStorage.setItem(
+      welcomeShownStorageKey(userId),
+      JSON.stringify({ at: Date.now() }),
+    );
+  } catch {
+    // ignore
+  }
+}
+
+export function hasSignupWelcomeShown(userId?: string | null): boolean {
+  if (!userId?.trim()) return false;
+  try {
+    return Boolean(localStorage.getItem(welcomeShownStorageKey(userId)));
+  } catch {
+    return false;
+  }
+}
+
+export function clearSignupWelcomeShown(userId?: string | null): void {
+  if (!userId?.trim()) return;
+  try {
+    localStorage.removeItem(welcomeShownStorageKey(userId));
   } catch {
     // ignore
   }
@@ -136,10 +180,7 @@ export function notifySignupConfirmed(payload: { bonusGranted?: boolean } = {}):
   }
   dispatchAuthUiEvent({ type: "close-auth-modal" });
   dispatchAuthUiEvent({ type: "signup-confirmed", ...payload });
-  dispatchAuthUiEvent({
-    type: "show-welcome",
-    message: SIGNUP_WELCOME_MESSAGE,
-  });
+  // show-welcome は元タブ側で pending_registration + 未表示チェック後に行う
 }
 
 export function notifyPasswordRecovery(): void {
