@@ -1,12 +1,20 @@
 /**
- * メール確認 / パスワード再設定の「元タブ完結」用同期ヘルパー
+ * メール確認後の「元タブ完結」用フラグ / 同期ヘルパー
  *
- * pending は localStorage（タブ間共有）を正とし、sessionStorage も併用する。
+ * 仕様キー: localStorage `pending_registration` = "true"
+ * （バックグラウンド中に onAuthStateChange がスキップされても、
+ *  タブ focus / visibilitychange で getSession して判定する）
  */
 
-export const PENDING_REGISTRATION_KEY = "fleama_pending_registration";
-/** @deprecated PENDING_REGISTRATION_KEY を利用 */
-export const PENDING_SIGNUP_KEY = "fleama_pending_signup";
+/** 仕様どおりのキー名 */
+export const PENDING_REGISTRATION_KEY = "pending_registration";
+
+/** 旧キー（移行・掃除用） */
+const LEGACY_PENDING_KEYS = [
+  "fleama_pending_registration",
+  "fleama_pending_signup",
+] as const;
+
 export const PENDING_RECOVERY_KEY = "fleama_pending_recovery";
 export const AUTH_PING_KEY = "fleama_auth_ping";
 export const AUTH_RECOVERY_PING_KEY = "fleama_auth_recovery_ping";
@@ -15,7 +23,6 @@ export const AUTH_CHANNEL = "fleama_auth";
 export const SIGNUP_WELCOME_MESSAGE =
   "会員登録ありがとうございます！Pro機能を1回無料でお試しいただけます。";
 
-/** 元タブの Auth UI（モーダル閉鎖など）向けカスタムイベント */
 export const AUTH_UI_EVENT = "fleama_auth_ui";
 
 export type AuthUiEventDetail =
@@ -33,17 +40,10 @@ export function dispatchAuthUiEvent(detail: AuthUiEventDetail): void {
   }
 }
 
-export function markPendingSignup(email: string): void {
-  const value = email.trim().toLowerCase() || "1";
-  const payload = JSON.stringify({ email: value, at: Date.now() });
+/** 新規登録メール送信直後に呼ぶ */
+export function markPendingSignup(_email?: string): void {
   try {
-    // タブ間で共有（元タブ検知の本命）
-    localStorage.setItem(PENDING_REGISTRATION_KEY, payload);
-  } catch {
-    // ignore
-  }
-  try {
-    sessionStorage.setItem(PENDING_SIGNUP_KEY, value);
+    localStorage.setItem(PENDING_REGISTRATION_KEY, "true");
   } catch {
     // ignore
   }
@@ -55,21 +55,23 @@ export function clearPendingSignup(): void {
   } catch {
     // ignore
   }
-  try {
-    sessionStorage.removeItem(PENDING_SIGNUP_KEY);
-  } catch {
-    // ignore
+  for (const key of LEGACY_PENDING_KEYS) {
+    try {
+      localStorage.removeItem(key);
+      sessionStorage.removeItem(key);
+    } catch {
+      // ignore
+    }
   }
 }
 
 export function hasPendingSignup(): boolean {
   try {
-    if (localStorage.getItem(PENDING_REGISTRATION_KEY)) return true;
-  } catch {
-    // ignore
-  }
-  try {
-    if (sessionStorage.getItem(PENDING_SIGNUP_KEY)) return true;
+    if (localStorage.getItem(PENDING_REGISTRATION_KEY) === "true") return true;
+    // 旧実装互換
+    for (const key of LEGACY_PENDING_KEYS) {
+      if (localStorage.getItem(key) || sessionStorage.getItem(key)) return true;
+    }
   } catch {
     // ignore
   }

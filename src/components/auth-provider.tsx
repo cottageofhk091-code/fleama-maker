@@ -12,14 +12,13 @@ import {
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { PasswordRecoveryModal } from "@/components/password-recovery-modal";
+import { RegistrationFocusSync } from "@/components/registration-focus-sync";
 import { WelcomeBanner } from "@/components/welcome-banner";
 import { translateAuthError } from "@/lib/auth-errors";
 import {
   AUTH_CHANNEL,
-  AUTH_PING_KEY,
   AUTH_RECOVERY_PING_KEY,
   AUTH_UI_EVENT,
-  PENDING_REGISTRATION_KEY,
   SIGNUP_WELCOME_MESSAGE,
   type AuthUiEventDetail,
   clearPendingRecovery,
@@ -62,6 +61,9 @@ const AuthContext = createContext<AuthContextValue | null>(null);
  * 注意: 会員登録・パスワード再設定メールは supabase.auth.signUp /
  * resetPasswordForEmail では送らない。
  * UI は /api/auth/signup・/api/auth/forgot-password（Resend）を直接呼ぶこと。
+ *
+ * メール確認後の元タブ復帰は RegistrationFocusSync が担当
+ * （focus / visibilitychange で getSession + pending_registration 判定）。
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
@@ -80,18 +82,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     (message?: string) => {
       closeAuthModals();
       if (welcomeShownRef.current) {
-        // 二重歓迎は出さないが、モーダルは必ず閉じる
         clearPendingSignup();
         return;
       }
       welcomeShownRef.current = true;
       setWelcomeMessage(message?.trim() || SIGNUP_WELCOME_MESSAGE);
       clearPendingSignup();
-      // 念のためもう一度閉じる（Header 未マウント対策）
       window.setTimeout(() => closeAuthModals(), 0);
-      window.setTimeout(() => closeAuthModals(), 300);
+      window.setTimeout(() => closeAuthModals(), 250);
     },
     [closeAuthModals],
+  );
+
+  const onSessionResolved = useCallback(
+    (sessionExists: boolean) => {
+      if (!sessionExists) return;
+      wasLoggedInRef.current = true;
+      void getSupabase()
+        ?.auth.getSession()
+        .then(({ data }) => {
+          setSession(data.session);
+        });
+    },
+    [],
+  );
+
+  const onShowWelcome = useCallback(
+    (message: string) => {
+      showSignupWelcome(message);
+    },
+    [showSignupWelcome],
+  );
+
+  const welcomeAlreadyShown = useCallback(
+    () => welcomeShownRef.current,
+    [],
   );
 
   useEffect(() => {
@@ -102,46 +127,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     let mounted = true;
-
-    const syncFromSession = async (opts?: {
-      forceWelcome?: boolean;
-      fromEvent?: string;
-    }) => {
-      if (!mounted || isAuthHelperPage()) return;
-      const { data } = await supabase.auth.getSession();
-      if (!mounted) return;
-
-      const next = data.session;
-      setSession(next);
-
-      const pending = hasPendingSignup();
-      const justLoggedIn = Boolean(next?.user) && !wasLoggedInRef.current;
-
-      if (next?.user) {
-        closeAuthModals();
-        wasLoggedInRef.current = true;
-        if (pending || opts?.forceWelcome) {
-          showSignupWelcome();
-        } else if (
-          justLoggedIn &&
-          (opts?.fromEvent === "SIGNED_IN" || opts?.forceWelcome)
-        ) {
-          // pending が消えていても AUTH_PING 直後は歓迎
-          try {
-            const ping = localStorage.getItem(AUTH_PING_KEY);
-            if (ping) {
-              const parsed = JSON.parse(ping) as { at?: number };
-              if (parsed.at && Date.now() - parsed.at < 5 * 60 * 1000) {
-                showSignupWelcome();
-                localStorage.removeItem(AUTH_PING_KEY);
-              }
-            }
-          } catch {
-            // ignore
-          }
-        }
-      }
-    };
 
     void supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
@@ -168,6 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (event === "PASSWORD_RECOVERY") return;
       }
 
+      // バックグラウンドで届いた場合のフォールバック
       if (
         (event === "SIGNED_IN" ||
           event === "INITIAL_SESSION" ||
@@ -191,24 +177,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     const onStorage = (e: StorageEvent) => {
-      if (!e.key) return;
-      if (e.key === AUTH_RECOVERY_PING_KEY && e.newValue) {
-        if (!isAuthHelperPage()) {
-          setPasswordRecoveryOpen(true);
-          closeAuthModals();
-        }
-        return;
-      }
-      // pending_registration / auth ping / supabase session の変化
-      if (
-        e.key === AUTH_PING_KEY ||
-        e.key === PENDING_REGISTRATION_KEY ||
-        e.key.includes("auth-token") ||
-        e.key.includes("sb-")
-      ) {
-        void syncFromSession({
-          forceWelcome: e.key === AUTH_PING_KEY && Boolean(e.newValue),
-        });
+      if (e.key === AUTH_RECOVERY_PING_KEY && e.newValue && !isAuthHelperPage()) {
+        setPasswordRecoveryOpen(true);
+        closeAuthModals();
       }
     };
     window.addEventListener("storage", onStorage);
@@ -216,14 +187,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const onAuthUi = (e: Event) => {
       const detail = (e as CustomEvent<AuthUiEventDetail>).detail;
       if (!detail || isAuthHelperPage()) return;
-      if (detail.type === "close-auth-modal") return; // Header 側で処理
       if (detail.type === "show-welcome") {
-        closeAuthModals();
         showSignupWelcome(detail.message);
-        return;
-      }
-      if (detail.type === "signup-confirmed") {
-        void syncFromSession({ forceWelcome: true });
       }
     };
     window.addEventListener(AUTH_UI_EVENT, onAuthUi);
@@ -236,43 +201,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (event?.data?.type === "password-recovery") {
           setPasswordRecoveryOpen(true);
           closeAuthModals();
-          return;
-        }
-        if (event?.data?.type === "signup-confirmed") {
-          void syncFromSession({ forceWelcome: true });
         }
       };
     } catch {
       channel = null;
     }
 
-    const recheck = () => {
-      if (document.visibilityState === "hidden" || isAuthHelperPage()) return;
-      void syncFromSession({
-        forceWelcome: hasPendingSignup(),
-      });
-    };
-    document.addEventListener("visibilitychange", recheck);
-    window.addEventListener("focus", recheck);
-    window.addEventListener("pageshow", recheck);
-
-    // pending 中は定期的にセッションを確認（Broadcast 取りこぼし対策）
-    const pollTimer = window.setInterval(() => {
-      if (!mounted || isAuthHelperPage()) return;
-      if (!hasPendingSignup() && !welcomeShownRef.current) return;
-      if (welcomeShownRef.current) return;
-      void syncFromSession({ forceWelcome: hasPendingSignup() });
-    }, 1500);
-
     return () => {
       mounted = false;
       sub.subscription.unsubscribe();
       window.removeEventListener("storage", onStorage);
       window.removeEventListener(AUTH_UI_EVENT, onAuthUi);
-      document.removeEventListener("visibilitychange", recheck);
-      window.removeEventListener("focus", recheck);
-      window.removeEventListener("pageshow", recheck);
-      window.clearInterval(pollTimer);
       channel?.close();
     };
   }, [closeAuthModals, showSignupWelcome]);
@@ -365,6 +304,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={value}>
+      <RegistrationFocusSync
+        onSessionResolved={onSessionResolved}
+        onShowWelcome={onShowWelcome}
+        welcomeAlreadyShown={welcomeAlreadyShown}
+      />
       {welcomeMessage && (
         <WelcomeBanner
           message={welcomeMessage}
