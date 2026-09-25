@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { getPasswordResetRedirectUrl } from "@/lib/auth-redirect";
+import {
+  buildAppAuthActionUrl,
+  forceActionLinkRedirectTo,
+  getPasswordResetRedirectUrl,
+} from "@/lib/auth-redirect";
 import { sendFurimaAuthEmail } from "@/lib/furima-auth-email";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
@@ -8,7 +12,7 @@ export const runtime = "nodejs";
 /**
  * POST /api/auth/forgot-password
  * Admin generateLink(recovery) + Resend 直接送信
- * From: フリマリストSold <noreply@cloudflowriver.com>
+ * メール内リンクはフリマリスト /auth/password-reset-notice 直リンク
  */
 export async function POST(request: Request) {
   try {
@@ -32,6 +36,8 @@ export async function POST(request: Request) {
     }
 
     const redirectTo = getPasswordResetRedirectUrl(request);
+    console.info("[auth/forgot-password] redirectTo", redirectTo);
+
     const { data, error } = await supabaseAdmin.auth.admin.generateLink({
       type: "recovery",
       email,
@@ -40,8 +46,26 @@ export async function POST(request: Request) {
 
     // 存在しないメールでも成功扱い（列挙対策）。リンク生成できたときだけ送信。
     if (!error) {
-      const actionLink = data.properties?.action_link;
+      const tokenHash = data.properties?.hashed_token;
+      let actionLink: string | null = null;
+      if (tokenHash) {
+        actionLink = buildAppAuthActionUrl({
+          tokenHash,
+          type: "recovery",
+          request,
+        });
+      } else if (data.properties?.action_link) {
+        actionLink = forceActionLinkRedirectTo(
+          data.properties.action_link,
+          redirectTo,
+        );
+      }
+
       if (actionLink) {
+        console.info(
+          "[auth/forgot-password] actionLink host",
+          new URL(actionLink).host,
+        );
         await sendFurimaAuthEmail({
           to: email,
           kind: "recovery",

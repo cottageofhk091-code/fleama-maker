@@ -14,6 +14,8 @@ export function getStripe(): Stripe {
 }
 
 export function getSiteOrigin(request: Request): string {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (appUrl) return appUrl.replace(/\/$/, "");
   const envUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
   if (envUrl) return envUrl.replace(/\/$/, "");
   const proto = request.headers.get("x-forwarded-proto") ?? "http";

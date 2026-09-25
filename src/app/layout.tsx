@@ -31,10 +31,11 @@ const zenMaru = Zen_Maru_Gothic({
 
 export const metadata: Metadata = {
   metadataBase: new URL(
-    (process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000").replace(
-      /\/$/,
-      "",
-    ),
+    (
+      process.env.NEXT_PUBLIC_APP_URL ??
+      process.env.NEXT_PUBLIC_SITE_URL ??
+      "http://localhost:3000"
+    ).replace(/\/$/, ""),
   ),
   title: {
     default: SITE_NAME,

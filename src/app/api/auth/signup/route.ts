@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { APP_ID, saveUserProfile } from "@/lib/analytics";
 import { PROFILE_PLAN } from "@/lib/billing";
-import { getAuthCallbackUrl } from "@/lib/auth-redirect";
+import {
+  buildAppAuthActionUrl,
+  forceActionLinkRedirectTo,
+  getAuthCallbackUrl,
+} from "@/lib/auth-redirect";
 import { sendFurimaAuthEmail } from "@/lib/furima-auth-email";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
@@ -13,7 +17,8 @@ export const runtime = "nodejs";
  * Supabase SMTP / auth.signUp は使わない。
  * 1) admin.createUser（email_confirm: false → メール非送信）
  * 2) admin.generateLink（リンクのみ取得・メール非送信）
- * 3) Resend で From: フリマリストSold として送信
+ * 3) hashed_token からフリマリスト /auth/confirmed 直リンクを組み立て Resend 送信
+ *    （共有 Supabase の Site URL＝他アプリへの誤リダイレクトを回避）
  */
 export async function POST(request: Request) {
   try {
@@ -47,6 +52,7 @@ export async function POST(request: Request) {
     }
 
     const redirectTo = getAuthCallbackUrl("/", request);
+    console.info("[auth/signup] redirectTo", redirectTo);
 
     // 1. ユーザー作成（確認メールは送られない）
     const { data: created, error: createError } =
@@ -77,36 +83,69 @@ export async function POST(request: Request) {
     }
 
     // 2. 確認用リンクのみ生成（メールは送られない）
+    // type: signup + password で確認用トークンを取得
     const { data: linkData, error: linkError } =
       await supabaseAdmin.auth.admin.generateLink({
-        type: "magiclink",
+        type: "signup",
         email,
+        password,
         options: { redirectTo },
       });
 
     if (linkError) {
-      console.error("[auth/signup] generateLink error:", linkError);
-      return NextResponse.json(
-        { error: linkError.message || "確認リンクの生成に失敗しました。" },
-        { status: 500 },
-      );
-    }
+      console.error("[auth/signup] generateLink(signup) error:", linkError);
+      // フォールバック: magiclink
+      const fallback = await supabaseAdmin.auth.admin.generateLink({
+        type: "magiclink",
+        email,
+        options: { redirectTo },
+      });
+      if (fallback.error || !fallback.data.properties?.hashed_token) {
+        console.error(
+          "[auth/signup] generateLink fallback error:",
+          fallback.error,
+        );
+        return NextResponse.json(
+          { error: linkError.message || "確認リンクの生成に失敗しました。" },
+          { status: 500 },
+        );
+      }
 
-    const actionLink = linkData.properties?.action_link;
-    if (!actionLink) {
-      console.error("[auth/signup] missing action_link", linkData);
-      return NextResponse.json(
-        { error: "確認リンクの生成に失敗しました。" },
-        { status: 500 },
-      );
+      const tokenHash = fallback.data.properties.hashed_token;
+      const actionLink = buildAppAuthActionUrl({
+        tokenHash,
+        type: "magiclink",
+        request,
+      });
+      await sendFurimaAuthEmail({ to: email, kind: "signup", actionLink });
+    } else {
+      const tokenHash = linkData.properties?.hashed_token;
+      if (!tokenHash) {
+        // hashed_token が無い場合のみ action_link を使い、redirect_to を強制上書き
+        const raw = linkData.properties?.action_link;
+        if (!raw) {
+          console.error("[auth/signup] missing token/link", linkData);
+          return NextResponse.json(
+            { error: "確認リンクの生成に失敗しました。" },
+            { status: 500 },
+          );
+        }
+        const actionLink = forceActionLinkRedirectTo(raw, redirectTo);
+        console.warn(
+          "[auth/signup] hashed_token missing; rewriting action_link redirect_to",
+          { redirectTo },
+        );
+        await sendFurimaAuthEmail({ to: email, kind: "signup", actionLink });
+      } else {
+        const actionLink = buildAppAuthActionUrl({
+          tokenHash,
+          type: "signup",
+          request,
+        });
+        console.info("[auth/signup] actionLink host", new URL(actionLink).host);
+        await sendFurimaAuthEmail({ to: email, kind: "signup", actionLink });
+      }
     }
-
-    // 3. Resend でアプリ名義メール送信
-    await sendFurimaAuthEmail({
-      to: email,
-      kind: "signup",
-      actionLink,
-    });
 
     const userId = created.user?.id;
     if (userId) {
