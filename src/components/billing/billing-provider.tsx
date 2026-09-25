@@ -72,6 +72,11 @@ type BillingContextValue = {
   ensureProTrialOrPaid: () => Promise<boolean>;
   /** お試しセッションを終了（次回からモザイク。残枠は戻さない） */
   endProTrialSession: () => void;
+  /**
+   * 生成リセット用: Pro ロック（モザイク）だけ戻す。
+   * free_credits / 消費済みフラグは変更しない。
+   */
+  lockProSession: () => void;
   /** DB の free_credits を再取得して反映 */
   refreshFreeCredits: () => Promise<void>;
   /** Pro API レスポンスの remainingCredits を即時反映 */
@@ -495,6 +500,12 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     });
   }, [persist]);
 
+  /** リセット時: ロックのみ戻し、クレジット残数は維持 */
+  const lockProSession = useCallback(() => {
+    setProTrialActive(false);
+    setTrialToken(null);
+  }, []);
+
   const value = useMemo<BillingContextValue>(
     () => ({
       ready,
@@ -560,6 +571,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       startProTrial,
       ensureProTrialOrPaid,
       endProTrialSession,
+      lockProSession,
       refreshFreeCredits,
       applyRemainingCredits,
       trialToken,
@@ -584,6 +596,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       startProTrial,
       ensureProTrialOrPaid,
       endProTrialSession,
+      lockProSession,
       refreshFreeCredits,
       applyRemainingCredits,
       trialToken,

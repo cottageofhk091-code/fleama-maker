@@ -90,7 +90,9 @@ export function verifyProTrialToken(
 /** profiles 列が無い環境向け: auth user_metadata に free_credits を保持 */
 async function readMetadataCredits(
   userId: string,
+  options?: { initIfMissing?: boolean },
 ): Promise<FreeCreditsSnapshot> {
+  const initIfMissing = options?.initIfMissing !== false;
   const admin = getSupabaseAdmin();
   if (!admin) {
     return {
@@ -121,8 +123,8 @@ async function readMetadataCredits(
 
   let freeCredits = normalizeCredits(rawCredits, usedFlag);
 
-  // 未設定なら初回 1 を書き込む
-  if (rawCredits == null && !usedFlag) {
+  // 未設定なら初回 1 を書き込む（消費済みは絶対に触らない）
+  if (initIfMissing && rawCredits == null && !usedFlag) {
     await writeMetadataCredits(userId, 1, false, meta);
     freeCredits = 1;
   }
@@ -171,14 +173,33 @@ async function writeMetadataCredits(
 }
 
 /**
- * 新規登録時: free_credits=1 を profiles（可能なら）＋ user_metadata に確実に付与
+ * 新規登録時: free_credits=1 を profiles（可能なら）＋ user_metadata に付与。
+ * すでに消費済み（0 / has_used_pro_trial）の場合は絶対に上書きしない。
  */
 export async function ensureSignupProfile(userId: string): Promise<void> {
   const admin = getSupabaseAdmin();
   if (!admin || !userId.trim()) return;
 
-  // 常に metadata に初期値を保証（列未作成環境のフォールバック）
-  await writeMetadataCredits(userId, 1, false);
+  // metadata: 未設定のときだけ 1。消費済みは触らない
+  const metaSnap = await readMetadataCredits(userId, { initIfMissing: true });
+  if (metaSnap.hasUsedProTrial || metaSnap.freeCredits <= 0) {
+    // 消費済みを profiles にも同期（列がある場合）
+    const { error: syncError } = await admin.from("profiles").upsert(
+      [
+        {
+          id: userId,
+          plan_type: metaSnap.planType ?? PROFILE_PLAN.free,
+          free_credits: 0,
+          has_used_pro_trial: true,
+        },
+      ],
+      { onConflict: "id" },
+    );
+    if (syncError && !isMissingCreditsColumn(syncError)) {
+      console.error("[free-credits] ensureSignupProfile sync used:", syncError);
+    }
+    return;
+  }
 
   const { data, error } = await admin
     .from("profiles")
@@ -211,12 +232,24 @@ export async function ensureSignupProfile(userId: string): Promise<void> {
     );
     if (upsertError) {
       console.error("[free-credits] ensureSignupProfile insert:", upsertError);
-      // metadata は既に 1 を書いているので継続可能
     }
     return;
   }
 
-  if (row.free_credits == null && !row.has_used_pro_trial) {
+  // 消費済みフラグがある行は残枠を 0 に揃える
+  if (row.has_used_pro_trial || (row.free_credits != null && row.free_credits <= 0)) {
+    if (row.free_credits !== 0 || !row.has_used_pro_trial) {
+      await admin
+        .from("profiles")
+        .update({ free_credits: 0, has_used_pro_trial: true })
+        .eq("id", userId);
+    }
+    await writeMetadataCredits(userId, 0, true);
+    return;
+  }
+
+  // NULL かつ未消費のみ 1 をバックフィル
+  if (row.free_credits == null) {
     const { error: updateError } = await admin
       .from("profiles")
       .update({ free_credits: 1, has_used_pro_trial: false })
@@ -228,13 +261,16 @@ export async function ensureSignupProfile(userId: string): Promise<void> {
 }
 
 /**
- * free_credits を取得。NULL は初回のみ 1。列が無い場合は user_metadata へフォールバック
+ * free_credits を取得。NULL は初回のみ 1。列が無い場合は user_metadata へフォールバック。
+ * profiles と metadata のどちらかが消費済みなら 0 を返す（リロードで戻らない）。
  */
 export async function getFreeCreditsSnapshot(
   userId: string,
 ): Promise<FreeCreditsSnapshot | null> {
   const admin = getSupabaseAdmin();
   if (!admin || !userId.trim()) return null;
+
+  const metaSnap = await readMetadataCredits(userId, { initIfMissing: false });
 
   const { data, error } = await admin
     .from("profiles")
@@ -244,28 +280,33 @@ export async function getFreeCreditsSnapshot(
 
   if (error) {
     console.error("[free-credits] getFreeCreditsSnapshot:", error);
-    if (isMissingCreditsColumn(error)) {
-      return readMetadataCredits(userId);
+    // 列なし等 → metadata を正とする（未設定ならここで初期化）
+    if (metaSnap.freeCredits === 1 && !metaSnap.hasUsedProTrial) {
+      const inited = await readMetadataCredits(userId, { initIfMissing: true });
+      return inited;
     }
-    // その他エラーでも metadata を試す
-    return readMetadataCredits(userId);
+    return metaSnap;
   }
 
   if (!data) {
     await ensureSignupProfile(userId);
-    return readMetadataCredits(userId);
+    return readMetadataCredits(userId, { initIfMissing: true });
   }
 
   const row = data as ProfileRow;
-  const usedFlag = Boolean(row.has_used_pro_trial);
+  const usedFlag = Boolean(row.has_used_pro_trial) || metaSnap.hasUsedProTrial;
   let freeCredits = normalizeCredits(row.free_credits, usedFlag);
 
-  if (row.free_credits == null && !usedFlag) {
+  // metadata 側が消費済みなら profiles が 1 でも 0 を優先
+  if (metaSnap.hasUsedProTrial || metaSnap.freeCredits <= 0) {
+    freeCredits = 0;
+  }
+
+  if (row.free_credits == null && !usedFlag && metaSnap.freeCredits >= 1) {
     await admin
       .from("profiles")
       .update({ free_credits: 1, has_used_pro_trial: false })
       .eq("id", userId);
-    await writeMetadataCredits(userId, 1, false);
     freeCredits = 1;
   }
 
@@ -276,7 +317,7 @@ export async function getFreeCreditsSnapshot(
   return {
     freeCredits,
     hasUsedProTrial: freeCredits <= 0,
-    planType: row.plan_type ?? null,
+    planType: row.plan_type ?? metaSnap.planType,
   };
 }
 
@@ -381,7 +422,8 @@ export async function checkProCredits(
 }
 
 /**
- * 成功時に free_credits を 1 → 0 へ消費し、継続用 trialToken を発行
+ * 成功時に free_credits を 1 → 0 へ消費し、継続用 trialToken を発行。
+ * metadata を先に await して永続化し、その後 profiles も更新する。
  */
 export async function consumeFreeCredit(
   userId: string,
@@ -398,65 +440,54 @@ export async function consumeFreeCredit(
     return { success: false, remainingCredits: 0 };
   }
 
-  const { data, error } = await admin
-    .from("profiles")
-    .update({
-      free_credits: 0,
-      has_used_pro_trial: true,
-    })
-    .eq("id", userId)
-    .gt("free_credits", 0)
-    .select("free_credits")
-    .maybeSingle();
+  // 1) metadata を必ず先に 0 へ（列未作成環境・リロード耐性の本丸）
+  const metaOk = await writeMetadataCredits(userId, 0, true);
+  if (!metaOk) {
+    console.error(
+      `[Pro Credit Check Error]: userId=${userId} free_credits=(metadata-consume-failed)`,
+    );
+    return { success: false, remainingCredits: 0 };
+  }
+
+  // 2) profiles も可能なら更新（失敗しても metadata が正なので続行）
+  const { error } = await admin.from("profiles").upsert(
+    [
+      {
+        id: userId,
+        free_credits: 0,
+        has_used_pro_trial: true,
+        plan_type: PROFILE_PLAN.free,
+      },
+    ],
+    { onConflict: "id" },
+  );
 
   if (error) {
     console.error(
-      `[Pro Credit Check Error]: userId=${userId} free_credits=(update-error)`,
+      `[Pro Credit Check Error]: userId=${userId} free_credits=(profiles-update-error)`,
       error,
     );
-    if (isMissingCreditsColumn(error)) {
-      const ok = await writeMetadataCredits(userId, 0, true);
-      if (ok) {
-        return {
-          success: true,
-          remainingCredits: 0,
-          trialToken: issueProTrialToken(userId),
-        };
-      }
+    if (!isMissingCreditsColumn(error)) {
+      console.warn(
+        "[free-credits] profiles 更新失敗だが metadata 消費済みのため success 扱い",
+      );
     }
-    // profiles 更新失敗時も metadata で消費を試みる
-    const metaOk = await writeMetadataCredits(userId, 0, true);
-    if (metaOk) {
-      return {
-        success: true,
-        remainingCredits: 0,
-        trialToken: issueProTrialToken(userId),
-      };
-    }
-    return { success: false, remainingCredits: 0 };
+  } else {
+    console.log("[Credit Check]", {
+      userId,
+      credits: 0,
+      action: "consumed",
+    });
   }
 
-  if (!data) {
-    // 行なし / 既に 0 → metadata 側を確認して消費
-    const snap = await readMetadataCredits(userId);
-    if (snap.freeCredits >= 1) {
-      const ok = await writeMetadataCredits(userId, 0, true);
-      if (ok) {
-        return {
-          success: true,
-          remainingCredits: 0,
-          trialToken: issueProTrialToken(userId),
-        };
-      }
-    }
+  // 3) 読み戻して確定
+  const verify = await readMetadataCredits(userId, { initIfMissing: false });
+  if (verify.freeCredits > 0) {
     console.error(
-      `[Pro Credit Check Error]: userId=${userId} free_credits=${snap.freeCredits}`,
+      `[Pro Credit Check Error]: userId=${userId} free_credits=${verify.freeCredits} (verify-failed)`,
     );
-    return { success: false, remainingCredits: 0 };
+    return { success: false, remainingCredits: verify.freeCredits };
   }
-
-  // profiles 成功時も metadata を同期
-  await writeMetadataCredits(userId, 0, true);
 
   return {
     success: true,

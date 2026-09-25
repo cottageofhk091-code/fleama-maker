@@ -17,7 +17,7 @@ import type { GenerateResult, ProductInput } from "@/lib/types";
 type MainTab = "single" | "pro";
 
 export function HomeClient() {
-  const { trySaveTemplate, openPaywall, quota } = useBilling();
+  const { trySaveTemplate, openPaywall, quota, lockProSession } = useBilling();
   const [tab, setTab] = useState<MainTab>("single");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<GenerateResult | null>(null);
@@ -29,6 +29,8 @@ export function HomeClient() {
     result && lastInput ? computeSeoInsights(lastInput, result) : null;
 
   function handleResetAll() {
+    // フォーム・結果クリア + Proロック（モザイク）を再設定。クレジット残数は維持。
+    lockProSession();
     setFormKey((k) => k + 1);
     setResult(null);
     setLastInput(null);
@@ -80,6 +82,17 @@ export function HomeClient() {
             <li>② 一発生成</li>
             <li>③ ワンタップでコピペ出品</li>
           </ol>
+
+          <div className="mt-5">
+            <button
+              type="button"
+              onClick={handleResetAll}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white/90 px-3.5 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white dark:border-slate-700 dark:bg-slate-900/90 dark:text-slate-200 dark:hover:bg-slate-900"
+            >
+              <RotateCcw className="h-4 w-4" />
+              情報をリセット
+            </button>
+          </div>
 
           <div className="mt-6 inline-flex rounded-xl border border-slate-200 bg-white/80 p-1 dark:border-slate-700 dark:bg-slate-900/80">
             <button
