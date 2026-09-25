@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { logAnalysisEvent } from "@/lib/analytics";
+import { logAnalysisEventServer } from "@/lib/analytics";
 import { estimateModelVariants, extractCodeHint } from "@/lib/model-estimate";
 import { lookupModelVariants } from "@/lib/model-lookup";
 import { getOrCreateUserId } from "@/lib/user-session";
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
 
     try {
       const { userId } = await getOrCreateUserId();
-      void logAnalysisEvent({
+      await logAnalysisEventServer({
         user_id: userId,
         metadata: {
           source: "model_lookup",
@@ -68,7 +68,7 @@ export async function POST(request: Request) {
     const fallback = estimateModelVariants(extractCodeHint(query), query);
     try {
       const { userId } = await getOrCreateUserId();
-      void logAnalysisEvent({
+      await logAnalysisEventServer({
         user_id: userId,
         metadata: {
           source: "model_lookup_fallback",

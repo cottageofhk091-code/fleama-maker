@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { logAnalysisEvent } from "@/lib/analytics";
+import { logAnalysisEventServer } from "@/lib/analytics";
 import { getRequestAuthUser } from "@/lib/auth-request";
 import {
   checkProCredits,
@@ -164,8 +164,9 @@ export async function POST(request: Request) {
 
     try {
       const { userId } = await getOrCreateUserId();
-      void logAnalysisEvent({
-        user_id: authUserId || userId,
+      const analyticsUserId = authUserId || userId;
+      const logged = await logAnalysisEventServer({
+        user_id: analyticsUserId,
         metadata: {
           category: input.category,
           brand: input.brand,
@@ -176,6 +177,12 @@ export async function POST(request: Request) {
             remainingCredits === undefined ? null : remainingCredits,
         },
       });
+      if (!logged) {
+        console.error(
+          "[generate] analytics_events 書き込み失敗（ダッシュボード未反映の可能性）",
+          { user_id: analyticsUserId },
+        );
+      }
     } catch (analyticsError) {
       console.error("Analytics event log error:", analyticsError);
     }

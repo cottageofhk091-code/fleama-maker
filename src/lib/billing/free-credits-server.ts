@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "crypto";
+import { APP_ID } from "@/lib/analytics";
 import { PROFILE_PLAN } from "@/lib/billing/quotas";
 import { isDevProBypassEnabled } from "@/lib/billing/dev-bypass";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
@@ -450,17 +451,24 @@ export async function consumeFreeCredit(
   }
 
   // 2) profiles も可能なら更新（失敗しても metadata が正なので続行）
-  const { error } = await admin.from("profiles").upsert(
-    [
-      {
-        id: userId,
-        free_credits: 0,
-        has_used_pro_trial: true,
-        plan_type: PROFILE_PLAN.free,
-      },
-    ],
-    { onConflict: "id" },
-  );
+  const profilePayload: Record<string, string | number | boolean> = {
+    id: userId,
+    app_id: APP_ID,
+    free_credits: 0,
+    has_used_pro_trial: true,
+    plan_type: PROFILE_PLAN.free,
+  };
+  let { error } = await admin.from("profiles").upsert([profilePayload], {
+    onConflict: "id",
+  });
+
+  if (error && /app_id/i.test(error.message || "")) {
+    const withoutAppId = { ...profilePayload };
+    delete withoutAppId.app_id;
+    ({ error } = await admin.from("profiles").upsert([withoutAppId], {
+      onConflict: "id",
+    }));
+  }
 
   if (error) {
     console.error(
@@ -477,6 +485,7 @@ export async function consumeFreeCredit(
       userId,
       credits: 0,
       action: "consumed",
+      app_id: APP_ID,
     });
   }
 

@@ -1,4 +1,5 @@
 import { getSupabase } from "@/lib/supabase";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 /** フリマリストSold の共通アナリティクス識別子 */
 export const APP_ID = "furima_sold" as const;
@@ -181,19 +182,20 @@ export async function trackVisit(params: {
 }
 
 /**
- * 分析・検索実行ログ → analytics_events
+ * 分析・検索実行ログ → analytics_events（ブラウザ / anon）
  */
 export async function logAnalysisEvent(params: {
   user_id: string;
   metadata?: AnalysisMetadata;
-}): Promise<void> {
+  event_type?: string;
+}): Promise<boolean> {
   const supabase = getSupabase();
-  if (!supabase) return;
+  if (!supabase) return false;
 
   const { error } = await supabase.from("analytics_events").insert([
     {
       app_id: APP_ID,
-      event_type: "analysis_executed",
+      event_type: params.event_type ?? "analysis_executed",
       user_id: params.user_id,
       metadata: params.metadata ?? {},
     },
@@ -201,11 +203,62 @@ export async function logAnalysisEvent(params: {
 
   if (error) {
     console.error("Supabase analytics_events error:", error);
+    return false;
   }
+  return true;
+}
+
+/**
+ * サーバー専用: Service Role で analytics_events へ確実に await 書き込み。
+ * 中央管理ダッシュボードの生成回数集計（COUNT）の本丸。
+ */
+export async function logAnalysisEventServer(params: {
+  user_id: string;
+  metadata?: AnalysisMetadata;
+  event_type?: string;
+}): Promise<boolean> {
+  const eventType = params.event_type ?? "analysis_executed";
+  const admin = getSupabaseAdmin();
+
+  if (!admin) {
+    console.error(
+      "[analytics] logAnalysisEventServer: SUPABASE_SERVICE_ROLE_KEY 未設定。anon へフォールバック",
+      { user_id: params.user_id, event_type: eventType },
+    );
+    return logAnalysisEvent(params);
+  }
+
+  const row = {
+    app_id: APP_ID,
+    event_type: eventType,
+    user_id: params.user_id,
+    metadata: params.metadata ?? {},
+  };
+
+  const { error } = await admin.from("analytics_events").insert([row]);
+  if (error) {
+    console.error("[analytics] analytics_events insert failed:", {
+      user_id: params.user_id,
+      app_id: APP_ID,
+      event_type: eventType,
+      message: error.message,
+      code: error.code,
+      details: error.details,
+    });
+    return false;
+  }
+
+  console.log("[analytics] analytics_events insert ok", {
+    user_id: params.user_id,
+    app_id: APP_ID,
+    event_type: eventType,
+  });
+  return true;
 }
 
 /**
  * 会員・アンケートプロフィール → profiles（upsert）
+ * app_id を付けて中央管理ダッシュボードの製品フィルタと整合させる。
  */
 export async function saveUserProfile(
   params: UserProfileInput,
@@ -215,6 +268,7 @@ export async function saveUserProfile(
 
   const row: Record<string, string | boolean | number | null> = {
     id: params.user_id,
+    app_id: APP_ID,
   };
   if (params.plan_type !== undefined) {
     row.plan_type = params.plan_type;
@@ -248,6 +302,17 @@ export async function saveUserProfile(
       console.error(
         "[Pro Credit Check Error]: profiles.free_credits 列が見つかりません。マイグレーションを適用してください。",
       );
+    }
+    // app_id 列が無い環境では app_id なしで再試行
+    if (/app_id/i.test(error.message || "") || error.code === "PGRST204") {
+      const withoutAppId = { ...row };
+      delete withoutAppId.app_id;
+      const retry = await supabase.from("profiles").upsert([withoutAppId], {
+        onConflict: "id",
+      });
+      if (retry.error) {
+        console.error("Supabase profiles upsert retry error:", retry.error);
+      }
     }
   }
 }

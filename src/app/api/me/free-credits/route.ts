@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { logAnalysisEventServer } from "@/lib/analytics";
 import { getRequestAuthUser } from "@/lib/auth-request";
 import {
   consumeFreeCredit,
@@ -70,6 +71,9 @@ export async function POST(request: Request) {
 
   const consumed = await consumeFreeCredit(user.id);
   if (!consumed.success) {
+    console.error(
+      `[Pro Credit Check Error]: userId=${user.id} free_credits=(consume-api-failed)`,
+    );
     return NextResponse.json(
       {
         success: false,
@@ -77,6 +81,23 @@ export async function POST(request: Request) {
         error: PRO_TRIAL_EXHAUSTED_MESSAGE,
       },
       { status: 403 },
+    );
+  }
+
+  const logged = await logAnalysisEventServer({
+    user_id: user.id,
+    event_type: "analysis_executed",
+    metadata: {
+      source: "pro_trial_consume",
+      is_trial: true,
+      free_credits: 0,
+      remaining_credits: 0,
+    },
+  });
+  if (!logged) {
+    console.error(
+      "[free-credits] 消費は成功したが analytics_events 書き込み失敗",
+      { userId: user.id },
     );
   }
 
